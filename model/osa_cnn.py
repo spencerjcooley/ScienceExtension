@@ -44,6 +44,46 @@ class OSA_CNN(nn.Module):
         x = self.fc2(x)                                     # (N, 1)
         return x # No sigmoid required by using BCEWithLogitsLoss (Sigmoid built in)
 
+class OSA_CNN_V2(nn.Module):
+    def __init__(self, kernel_1, features_1, stride_1, padding_1, kernel_2, features_2, stride_2, padding_2, kernel_3, features_3, stride_3, padding_3, linear_1, dropout):
+        """
+        PARAMETERS
+        ---
+        kernel_N: Nth Layer Kernel Size
+        features_N: Nth Layer Number of Features (Kernel Depth)
+        stride_N: Nth Layer Stride
+        padding_N: Nth Layer Zero-Padding
+        """
+
+        super(OSA_CNN_V2, self).__init__()
+
+        self.conv1 = nn.Conv1d(in_channels=1, out_channels=features_1, kernel_size=kernel_1, stride=stride_1, padding=padding_1)
+        self.bn1 = nn.BatchNorm1d(features_1)
+        self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)
+
+        self.conv2 = nn.Conv1d(in_channels=features_1, out_channels=features_2, kernel_size=kernel_2, stride=stride_2, padding=padding_2)
+        self.bn2 = nn.BatchNorm1d(features_2)
+        self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2)
+
+        self.conv3 = nn.Conv1d(in_channels=features_2, out_channels=features_3, kernel_size=kernel_3, stride=stride_3, padding=padding_3)
+        self.bn3 = nn.BatchNorm1d(features_3)
+
+        self.global_pool = nn.AdaptiveAvgPool1d(1)
+
+        self.fc1 = nn.Linear(features_3, linear_1)
+        self.dropout1 = nn.Dropout(dropout)
+
+        self.fc2 = nn.Linear(linear_1, 1)
+
+    def forward(self, x):
+        x = self.pool1(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(F.relu(self.bn2(self.conv2(x))))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.global_pool(x).squeeze(2)
+        x = self.dropout1(F.relu(self.fc1(x)))
+        x = self.fc2(x)
+        return x
+
 # MODEL DEBUG + VISUALISATION
 if __name__ == "__main__":
     model = OSA_CNN()
