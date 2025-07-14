@@ -1,5 +1,4 @@
 import os
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -21,7 +20,7 @@ class OSA_CNN(nn.Module):
         self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2) # 3000 -> 1500
 
         # (1500, 1) | 64 Channels
-        self.conv3 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1) # 1500 -> 1500
+        self.conv3 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=5, stride=1, padding=2) # 1500 -> 1500
         self.bn3 = nn.BatchNorm1d(128)
 
         # (1500, 1) | 128 Channels
@@ -45,10 +44,11 @@ class OSA_CNN(nn.Module):
         x = self.fc2(x)                                     # (N, 1)
         return x # No sigmoid required by using BCEWithLogitsLoss (Sigmoid built in)
 
-model = OSA_CNN()
-
 # MODEL DEBUG + VISUALISATION
-summary(model, input_size=(8, 1, 6000), col_names=["input_size", "output_size", "num_params", "kernel_size"])
-if not os.path.exists("ModelVisuals"):
-    os.mkdir("ModelVisuals")
-    draw_graph(model, input_size=(1, 1, 6000), expand_nested=True).visual_graph.render("osa_cnn", os.path.abspath("ModelVisuals"), format="svg")
+if __name__ == "__main__":
+    model = OSA_CNN()
+    summary(model, input_size=(8, 1, 6000), col_names=["input_size", "output_size", "num_params", "kernel_size"])
+    if not os.path.exists("ModelVisuals") and input('Visualise the Model (Y/N): ').lower() == "y":
+        os.mkdir("ModelVisuals")
+        draw_graph(model, input_size=(1, 1, 6000), expand_nested=True).visual_graph.render("osa_cnn", os.path.abspath("ModelVisuals"), format="svg")
+        print('Stored in ModelVisuals')
