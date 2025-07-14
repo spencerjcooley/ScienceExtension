@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
+from copy import deepcopy
 
-def train_model(model, dataloader, epochs, optimiser, device):
+def train_model(model, optimiser, device, epochs, patience, dataloader, val_dataloader=None):
     loss_function = nn.BCEWithLogitsLoss()
+    best_model_state = None
+    best_val_loss = float('inf')
+    epochs_no_improvement = 0
 
     model.train()
     for epoch in range(epochs):
@@ -16,7 +20,21 @@ def train_model(model, dataloader, epochs, optimiser, device):
             loss.backward()
             optimiser.step()
 
-def evaluate_model(model, dataloader, device):
+        if val_dataloader is not None:
+            val_loss = evaluate_model(model=model, device=device, dataloader=val_dataloader)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_model_state = deepcopy(model.state_dict())
+                epochs_no_improvement = 0
+            else: epochs_no_improvement += 1
+
+            if epochs_no_improvement >= patience:
+                print(f"Early Stopping at Epoch {epoch + 1}")
+                break
+
+        if val_dataloader is not None and best_model_state is not None: model.load_state_dict(best_model_state)
+
+def evaluate_model(model, device, dataloader):
     loss_function = nn.BCEWithLogitsLoss()
     total_loss, total_segments = 0.0, 0
 
@@ -34,7 +52,7 @@ def evaluate_model(model, dataloader, device):
     
     return total_loss / total_segments
 
-def evaluate_model_full(model, dataloader, device, threshold=0.5):
+def evaluate_model_full(model, device, dataloader, threshold=0.5):
     loss_function = nn.BCEWithLogitsLoss()
     total_loss, total_segments = 0.0, 0
     TP, TN, FP, FN = 0, 0, 0, 0
