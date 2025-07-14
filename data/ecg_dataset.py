@@ -3,25 +3,35 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-class ECGDataset(Dataset):
+
+
+class SubjectData:
+    def __init__(self, segments, labels):
+        self.x = torch.tensor(segments, dtype=torch.float32).unsqueeze(1)   # (n_segments, 1, 6000)
+        self.y = torch.tensor(labels, dtype=torch.float32)                  # (n_segments)
+    
+    def __len__(self): return len(self.y)
+    
+class PatientDataset:
     def __init__(self, data_dir):
-        self.file_paths = [os.path.join(data_dir, file_name) for file_name in os.listdir(data_dir) if file_name.endswith('npz')]
-        self.segments, self.labels = [], []
-        
-        for file_path in self.file_paths:
-            data = np.load(file_path)
-            
-            segments = data['segments'] # shape: (N, 6000)
-            labels = data['labels']     # shape: (N,)
-
-            self.segments.append(segments)
-            self.labels.append(labels)
-
-        self.segments = np.concatenate(self.segments, axis=0) # (N, 6000)
-        self.labels = np.concatenate(self.labels, axis=0)
-
-        self.segments = torch.tensor(self.segments, dtype=torch.float32).unsqueeze(1) # Add Channel Dimension | (N, 1, 6000)
-        self.labels = torch.tensor(self.labels, dtype=torch.float32) # (N, 1)
-
+        self.subjects = [] # Store all patients separately in SubjectData structures
+        for file_path in os.listdir(data_dir):
+            if not file_path.endswith('.npz'): continue
+            data = np.load(os.path.join(data_dir, file_path))
+            self.subjects.append(SubjectData(segments=data['segments'], labels=data['labels']))
+    
+    def __len__(self):return len(self.subjects)
+    def __getitem__(self, idx):return self.subjects[idx]
+    
+class SegmentDataset(Dataset):
+    def __init__(self, subject_list):
+        self.data = torch.cat([subject.x for subject in subject_list], dim=0)
+        self.labels = torch.cat([subject.y for subject in subject_list], dim=0)
+    
     def __len__(self): return len(self.labels)
-    def __getitem__(self, idx): return self.segments[idx], self.labels[idx]
+    def __getitem__(self, idx): return self.data[idx], self.labels[idx]
+    
+
+
+if __name__ == "__main__":
+    dataset = PatientDataset("./data")
