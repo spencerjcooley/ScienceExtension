@@ -11,8 +11,8 @@ class ECGDataset(Dataset):
         for file_path in self.file_paths:
             data = np.load(file_path)
             
-            segments = data['segments']  # shape: (N, 6000)
-            labels = data['labels']      # shape: (N,)
+            segments = data['segments'] # shape: (N, 6000)
+            labels = data['labels']     # shape: (N,)
 
             self.segments.append(segments)
             self.labels.append(labels)
