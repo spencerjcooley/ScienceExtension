@@ -9,6 +9,8 @@ class OSA_CNN(nn.Module):
     def __init__(self):
         super(OSA_CNN, self).__init__()
 
+        self.relu = nn.ReLU(inplace=True)
+
         # (6000, 1) | 1 Channel
         self.conv1 = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=15, stride=1, padding=7) # 6000 -> 6000
         self.bn1 = nn.BatchNorm1d(32)
@@ -36,11 +38,11 @@ class OSA_CNN(nn.Module):
 
     def forward(self, x):
         # X shape: (N, 1, 6000) | Note: N is the batch size which will be used for Batch GD
-        x = self.pool1(F.relu(self.bn1(self.conv1(x))))     # (N, 32, 3000) | (Batch Size, Height, Channels)
-        x = self.pool2(F.relu(self.bn2(self.conv2(x))))     # (N, 64, 1500)
-        x = F.relu(self.bn3(self.conv3(x)))                 # (N, 128, 750)
+        x = self.pool1(self.relu(self.bn1(self.conv1(x))))  # (N, 32, 3000) | (Batch Size, Height, Channels)
+        x = self.pool2(self.relu(self.bn2(self.conv2(x))))  # (N, 64, 1500)
+        x = self.relu(self.bn3(self.conv3(x)))              # (N, 128, 750)
         x = self.global_pool(x).squeeze(2)                  # (N, 128)
-        x = self.dropout1(F.relu(self.fc1(x)))              # (N, 64)
+        x = self.dropout1(self.relu(self.fc1(x)))           # (N, 64)
         x = self.fc2(x)                                     # (N, 1)
         return x # No sigmoid required by using BCEWithLogitsLoss (Sigmoid built in)
 
@@ -56,6 +58,8 @@ class OSA_CNN_V2(nn.Module):
         """
 
         super(OSA_CNN_V2, self).__init__()
+
+        self.relu = nn.ReLU(inplace=True)
 
         self.conv1 = nn.Conv1d(in_channels=1, out_channels=features_1, kernel_size=kernel_1, stride=stride_1, padding=padding_1)
         self.bn1 = nn.BatchNorm1d(features_1)
@@ -76,11 +80,11 @@ class OSA_CNN_V2(nn.Module):
         self.fc2 = nn.Linear(linear_1, 1)
 
     def forward(self, x):
-        x = self.pool1(F.relu(self.bn1(self.conv1(x))))
-        x = self.pool2(F.relu(self.bn2(self.conv2(x))))
-        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.pool1(self.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(self.relu(self.bn2(self.conv2(x))))
+        x = self.relu(self.bn3(self.conv3(x)))
         x = self.global_pool(x).squeeze(2)
-        x = self.dropout1(F.relu(self.fc1(x)))
+        x = self.dropout1(self.relu(self.fc1(x)))
         x = self.fc2(x)
         return x
 
