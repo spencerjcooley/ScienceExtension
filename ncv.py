@@ -17,14 +17,16 @@ PARAMETER_ITER = 1
 PARAMETER_GRID = {
     "LR": reciprocal(1e-5, 1e-2),
     "BATCH_SIZE": [8, 64],
-    "EPOCHS": [1]
+    "EPOCHS": [1],
+    "PATIENCE": [10, 15, 20, 25]
 }
 
 # PARAMETER_ITER = 10
 # PARAMETER_GRID = {
 #     "LR": reciprocal(1e-5, 1e-2),
 #     "BATCH_SIZE": [8, 16, 32, 64],
-#     "EPOCHS": [50, 100, 150, 200]
+#     "EPOCHS": [50, 100, 150, 200],
+#     "PATIENCE": [10, 15, 20, 25]
 # }
 
 PATIENT_DATA = PatientDataset("data")
@@ -62,8 +64,8 @@ for i_outer_fold, (train_idx, test_idx) in enumerate(kf_outer.split(range(len(PA
             model = OSA_CNN().to(DEVICE)
             optimiser = torch.optim.Adam(model.parameters(), lr=parameter_config["LR"])
 
-            train_model(model=model, dataloader=inner_train_loader, epochs=parameter_config["EPOCHS"], optimiser=optimiser, device=DEVICE)
-            val_loss = evaluate_model(model=model, dataloader=inner_val_loader, device=DEVICE)
+            train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=parameter_config["EPOCHS"], patience=parameter_config["PATIENCE"], dataloader=inner_train_loader, val_dataloader=inner_val_loader)
+            val_loss = evaluate_model(model=model, device=DEVICE, dataloader=inner_val_loader)
             fold_losses.append(val_loss)
 
             print(f"L: {val_loss:.4f} | T: {f'{default_timer() - T_0:.5f}'[:6]}s")
@@ -80,10 +82,10 @@ for i_outer_fold, (train_idx, test_idx) in enumerate(kf_outer.split(range(len(PA
     model = OSA_CNN().to(DEVICE)
     optimiser = torch.optim.Adam(model.parameters(), lr=best_model_config["LR"])
 
-    train_model(model=model, dataloader=outer_train_loader, epochs=best_model_config["EPOCHS"], optimiser=optimiser, device=DEVICE)
+    train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_model_config["EPOCHS"], patience=0, dataloader=outer_train_loader, val_dataloader=None)
 
     outer_test_loader = DataLoader(SegmentDataset(outer_test_subjects), batch_size=best_model_config["BATCH_SIZE"])
-    outer_test_metrics = evaluate_model_full(model=model, dataloader=outer_test_loader, device=DEVICE)
+    outer_test_metrics = evaluate_model_full(model=model, device=DEVICE, dataloader=outer_test_loader, threshold=0.5)
     print(f"[OUTER {i_outer_fold+1}/{OUTER_K}] | L: {outer_test_metrics['loss']:.4f} | A: {outer_test_metrics['accuracy']:.4f}\n")
 
     results.append({
