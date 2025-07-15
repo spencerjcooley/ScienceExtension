@@ -22,17 +22,18 @@ def train_model(model, optimiser, device, epochs, patience, dataloader, val_data
 
         if val_dataloader is not None:
             val_loss = evaluate_model(model=model, device=device, dataloader=val_dataloader)
+
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_model_state = deepcopy(model.state_dict())
                 epochs_no_improvement = 0
             else: epochs_no_improvement += 1
 
-            if epochs_no_improvement >= patience:
-                print(f"Early Stopping at Epoch {epoch + 1}")
-                break
+            if epochs_no_improvement >= patience: return epoch + 1
 
         if val_dataloader is not None and best_model_state is not None: model.load_state_dict(best_model_state)
+
+    return epochs
 
 def evaluate_model(model, device, dataloader):
     loss_function = nn.BCEWithLogitsLoss()
@@ -87,16 +88,17 @@ def evaluate_model_full(model, device, dataloader, threshold=0.5):
 
     return {
         "loss": total_loss / total_segments,
-        "threshold": threshold,
         "confusion_matrix": {
             "TP": TP,
             "TN": TN,
             "FP": FP,
             "FN": FN
         },
-        "accuracy": accuracy,
-        "precision": precision,
-        "recall": recall,
-        "specificity": specificity,
-        "f1": f1
+        "metrics": {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "specificity": specificity,
+            "f1": f1
+        }
     }
