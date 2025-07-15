@@ -6,7 +6,7 @@ from torchinfo import summary
 from torchview import draw_graph
 
 class OSA_CNN(nn.Module):
-    def __init__(self, conv1_config: tuple, conv2_config: tuple, conv3_config: tuple, linear_neurons: int, dropout: int):
+    def __init__(self, conv1_config: tuple, conv2_config: tuple, conv3_config: tuple, linear_neurons: int, dropout: float):
         """
         PARAMETERS
         ---
