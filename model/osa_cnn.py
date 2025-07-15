@@ -36,15 +36,15 @@ class OSA_CNN(nn.Module):
         self.global_pool = nn.AdaptiveAvgPool1d(1)
 
         self.linear1 = nn.Linear(in_features=f3, out_features=linear_neurons)
-        self.dropout1 = nn.Dropout(dropout, inplace=True)
+        self.dropout1 = nn.Dropout(dropout)
         self.linear2 = nn.Linear(in_features=linear_neurons, out_features=1)
 
     def forward(self, x):
         x = self.pool1(self.relu(self.bn1(self.conv1(x))))
         x = self.pool2(self.relu(self.bn2(self.conv2(x))))
-        x = self.relu(self.bn3(self.conv3))
+        x = self.relu(self.bn3(self.conv3(x)))
         x = self.global_pool(x).squeeze(2)
-        x = self.dropout1(self.relu(self.linear1))
+        x = self.dropout1(self.relu(self.linear1(x)))
         return self.linear2(x)
         
 
