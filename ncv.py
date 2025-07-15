@@ -59,18 +59,28 @@ PARAMETERS = {
 
 
 def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SUBJECT_LIST: SubjectList, OUTPUT_PATH: str, RANDOM_STATE: int = 1):
+    print(
+"""┏━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ OUTER ┃ CONFIGURATION ┃ INNER ┃  ELAPSED  ┃    LOSS    ┃
+┗━━━━━━━┻━━━━━━━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━━━━┛
+┏━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┓"""
+    )
+
     outer_folds = KFold(n_splits=OUTER_K, shuffle=True, random_state=RANDOM_STATE)
     for i_OUTER, (i_outer_train, i_outer_test) in enumerate(outer_folds.split(SUBJECT_LIST.subjects)):
         t_OUTER = default_timer()
         OUTPUT = {
-            "train_indices": i_outer_train,
-            "test_indices": i_outer_test,
+            "train_indices": i_outer_train.tolist(),
+            "test_indices": i_outer_test.tolist(),
             "summary": {},
             "configs": {}
         }
 
         outer_train_set = [SUBJECT_LIST[i] for i in i_outer_train]
         outer_test_set = [SUBJECT_LIST[i] for i in i_outer_test]
+
+        best_inner_loss = float('inf')
+        best_config = None
 
         inner_folds = KFold(n_splits=INNER_K, shuffle=True, random_state=i_OUTER)
         CONFIGS = list(ParameterSampler(param_distributions=PARAMETERS_GRID, n_iter=PARAMETERS_N, random_state=i_OUTER))
@@ -84,8 +94,6 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
             }
 
             total_loss = 0
-            best_inner_loss = float('inf')
-            best_config = None
 
             for i_INNER, (i_inner_train, i_inner_val) in enumerate(inner_folds.split(outer_train_set)):
                 t_INNER = default_timer()
@@ -97,19 +105,24 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
                 optimiser = optim.AdamW(params=model.parameters(), lr=CONFIG["LR"], weight_decay=CONFIG["WEIGHT_DECAY"])
 
                 epochs = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=CONFIG["EPOCHS"], patience=CONFIG["PATIENCE"], dataloader=inner_train_loader, val_dataloader=inner_val_loader)
-                loss = evaluate_model(model=model, device=DEVICE, dataloader=inner_val_loader, threshold=0.5)
+                loss = evaluate_model(model=model, device=DEVICE, dataloader=inner_val_loader)
                 total_loss += loss
+                elapsed_time = default_timer() - t_INNER
 
                 OUTPUT["configs"][i_CONFIG+1]["inner_folds"][i_INNER+1] = {
-                    "time": default_timer() - t_INNER,
+                    "time": elapsed_time,
                     "epochs": epochs,
                     "loss": loss
                 }
 
+                print(f"┃  {i_OUTER+1}/{OUTER_K}  ┃     {i_CONFIG+1:02d}/{PARAMETERS_N:02d}     ┃  {i_INNER+1}/{INNER_K}  ┃  {f'{elapsed_time}'[:8]}  ┃  {f'{loss}'[:7]}  ┃")
+            
+            print("┣━━━━━━━╋━━━━━━━━━━━━━━━╋━━━━━━━╋━━━━━━━━━━━╋━━━━━━━━━━━━┫")
             mean_loss = total_loss / INNER_K
             if mean_loss < best_inner_loss:
                 best_inner_loss = mean_loss
                 best_config = CONFIG
+                i_best_config = i_CONFIG
 
             OUTPUT["configs"][i_CONFIG+1]["summary"] = {
                 "time": default_timer() - t_CONFIG,
@@ -119,7 +132,7 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
         outer_train_loader = DataLoader(SegmentDataset(outer_train_set), batch_size=best_config["BATCH_SIZE"], shuffle=True)
         outer_test_loader = DataLoader(SegmentDataset(outer_test_set), batch_size=VAL_BATCH_SIZE, shuffle=False)
 
-        model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=best_config["DROPOUT"])
+        model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=best_config["DROPOUT"]).to(device=DEVICE)
         optimiser = optim.AdamW(params=model.parameters(), lr=best_config["LR"], weight_decay=best_config["WEIGHT_DECAY"])
 
         train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], patience=best_config["PATIENCE"], dataloader=outer_train_loader)
