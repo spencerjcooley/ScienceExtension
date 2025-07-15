@@ -6,87 +6,48 @@ from torchinfo import summary
 from torchview import draw_graph
 
 class OSA_CNN(nn.Module):
-    def __init__(self):
-        super(OSA_CNN, self).__init__()
-
-        self.relu = nn.ReLU(inplace=True)
-
-        # (6000, 1) | 1 Channel
-        self.conv1 = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=15, stride=1, padding=7) # 6000 -> 6000
-        self.bn1 = nn.BatchNorm1d(32)
-        self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2) # 6000 -> 3000
-
-        # (3000, 1) | 32 Channels
-        self.conv2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=7, stride=1, padding=3) # 3000 -> 3000
-        self.bn2 = nn.BatchNorm1d(64)
-        self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2) # 3000 -> 1500
-
-        # (1500, 1) | 64 Channels
-        self.conv3 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=5, stride=1, padding=2) # 1500 -> 1500
-        self.bn3 = nn.BatchNorm1d(128)
-
-        # (1500, 1) | 128 Channels
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
-
-        # (128, 1) | This now corresponds to height and width
-        self.fc1 = nn.Linear(128, 64)
-        self.dropout1 = nn.Dropout(0.5)
-
-        # (64, 1)
-        self.fc2 = nn.Linear(64, 1)
-        # -> 1
-
-    def forward(self, x):
-        # X shape: (N, 1, 6000) | Note: N is the batch size which will be used for Batch GD
-        x = self.pool1(self.relu(self.bn1(self.conv1(x))))  # (N, 32, 3000) | (Batch Size, Height, Channels)
-        x = self.pool2(self.relu(self.bn2(self.conv2(x))))  # (N, 64, 1500)
-        x = self.relu(self.bn3(self.conv3(x)))              # (N, 128, 750)
-        x = self.global_pool(x).squeeze(2)                  # (N, 128)
-        x = self.dropout1(self.relu(self.fc1(x)))           # (N, 64)
-        x = self.fc2(x)                                     # (N, 1)
-        return x # No sigmoid required by using BCEWithLogitsLoss (Sigmoid built in)
-
-class OSA_CNN_V2(nn.Module):
-    def __init__(self, kernel_1, features_1, stride_1, padding_1, kernel_2, features_2, stride_2, padding_2, kernel_3, features_3, stride_3, padding_3, linear_1, dropout):
+    def __init__(self, conv1_config: tuple, conv2_config: tuple, conv3_config: tuple, linear_neurons: int, dropout: int):
         """
         PARAMETERS
         ---
-        kernel_N: Nth Layer Kernel Size
-        features_N: Nth Layer Number of Features (Kernel Depth)
-        stride_N: Nth Layer Stride
-        padding_N: Nth Layer Zero-Padding
+        convN_config: kernel size, features, stride, and padding for Nth convolutional layer
+        linear_neurons: number of neurons in hidden layer
+        dropout: dropout p
         """
 
-        super(OSA_CNN_V2, self).__init__()
-
+        super(OSA_CNN, self).__init__()
         self.relu = nn.ReLU(inplace=True)
 
-        self.conv1 = nn.Conv1d(in_channels=1, out_channels=features_1, kernel_size=kernel_1, stride=stride_1, padding=padding_1)
-        self.bn1 = nn.BatchNorm1d(features_1)
+        k1, f1, s1, p1 = conv1_config
+        k2, f2, s2, p2 = conv2_config
+        k3, f3, s3, p3 = conv3_config
+
+        self.conv1 = nn.Conv1d(in_channels=1, out_channels=f1, kernel_size=k1, stride=s1, padding=p1)
+        self.bn1 = nn.BatchNorm1d(f1)
         self.pool1 = nn.MaxPool1d(kernel_size=2, stride=2)
 
-        self.conv2 = nn.Conv1d(in_channels=features_1, out_channels=features_2, kernel_size=kernel_2, stride=stride_2, padding=padding_2)
-        self.bn2 = nn.BatchNorm1d(features_2)
+        self.conv2 = nn.Conv1d(in_channels=f1, out_channels=f2, kernel_size=k2, stride=s2, padding=p2)
+        self.bn2 = nn.BatchNorm1d(f2)
         self.pool2 = nn.MaxPool1d(kernel_size=2, stride=2)
 
-        self.conv3 = nn.Conv1d(in_channels=features_2, out_channels=features_3, kernel_size=kernel_3, stride=stride_3, padding=padding_3)
-        self.bn3 = nn.BatchNorm1d(features_3)
+        self.conv3 = nn.Conv1d(in_channels=f2, out_channels=f3, kernel_size=k3, stride=s3, padding=p3)
+        self.bn3 = nn.BatchNorm1d(f3)
 
         self.global_pool = nn.AdaptiveAvgPool1d(1)
 
-        self.fc1 = nn.Linear(features_3, linear_1)
-        self.dropout1 = nn.Dropout(dropout)
-
-        self.fc2 = nn.Linear(linear_1, 1)
+        self.linear1 = nn.Linear(in_features=f3, out_features=linear_neurons)
+        self.dropout1 = nn.Dropout(dropout, inplace=True)
+        self.linear2 = nn.Linear(in_features=linear_neurons, out_features=1)
 
     def forward(self, x):
         x = self.pool1(self.relu(self.bn1(self.conv1(x))))
         x = self.pool2(self.relu(self.bn2(self.conv2(x))))
-        x = self.relu(self.bn3(self.conv3(x)))
+        x = self.relu(self.bn3(self.conv3))
         x = self.global_pool(x).squeeze(2)
-        x = self.dropout1(self.relu(self.fc1(x)))
-        x = self.fc2(x)
-        return x
+        x = self.dropout1(self.relu(self.linear1))
+        return self.linear2(x)
+        
+
 
 # MODEL DEBUG + VISUALISATION
 if __name__ == "__main__":
