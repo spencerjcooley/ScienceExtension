@@ -1,98 +1,145 @@
-import torch
+import os
+import json
+from timeit import default_timer
+from datetime import datetime
+
+from train import train_model, evaluate_model, evaluate_model_full
+from data import SubjectList, SegmentDataset
+from model import OSA_CNN
+
+from torch import device, cuda, optim
 from torch.utils.data import DataLoader
 from sklearn.model_selection import KFold, ParameterSampler
 from scipy.stats import reciprocal
-from timeit import default_timer
 
-from data import PatientDataset, SegmentDataset
-from model import OSA_CNN
-from train import train_model, evaluate_model, evaluate_model_full
+DEVICE = device("cuda" if cuda.is_available() else "cpu")
+OUTER_K, INNER_K = 5, 4
+VAL_BATCH_SIZE = 256
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-OUTER_K = 5
-INNER_K = 4
-
-# TEMPORARY VALUES FOR FAST TESTING
-PARAMETER_ITER = 1
-PARAMETER_GRID = {
-    "LR": reciprocal(1e-5, 1e-2),
-    "BATCH_SIZE": [32, 64, 128],
-    "EPOCHS": [1],
-    "PATIENCE": [5, 10, 15],
-    "DROPOUT": [0.3, 0.5, 0.7],
-    "WEIGHT_DECAY": reciprocal(1e-4, 1e-2)
+# MAGIC NUMBERS
+NETWORK = {
+    "CONV1": (15,32,1,2),
+    "CONV2": (7,64,1,3),
+    "CONV3": (5,128,1,2),
+    "LINEAR": 64
 }
 
-# PARAMETER_ITER = 20
-# PARAMETER_GRID = {
-#     "LR": reciprocal(1e-5, 1e-2),
-#     "BATCH_SIZE": [16, 32, 64, 128],
-#     "EPOCHS": [50, 100, 150, 200],
-#     "PATIENCE": [5, 10, 15],
-#     "DROPOUT": [0.3, 0.5, 0.7],
-#     "WEIGHT_DECAY": reciprocal(1e-4, 1e-2)
-# }
+SMALL_NETWORK = {
+    "CONV1": (15,16,1,7),
+    "CONV2": (7,32,1,3),
+    "CONV3": (3,64,1,1),
+    "LINEAR": 64
+}
 
-PATIENT_DATA = PatientDataset("data")
+# PARAMETERS
+PARAMETERS_DEBUG = {
+    "ITERATIONS": 1,
+    "GRID": {
+        "LR": reciprocal(1e-5, 1e-2),
+        "BATCH_SIZE": [32, 64, 128],
+        "EPOCHS": [1],
+        "PATIENCE": [5, 10, 15],
+        "DROPOUT": [0.3, 0.5, 0.7],
+        "WEIGHT_DECAY": reciprocal(1e-4, 1e-2)
+    }
+}
 
-results = []
-kf_outer = KFold(n_splits=OUTER_K, shuffle=True, random_state=1)
-for i_outer_fold, (train_idx, test_idx) in enumerate(kf_outer.split(range(len(PATIENT_DATA)))):
-    print(f"[OUTER {i_outer_fold+1}/{OUTER_K}]")
+PARAMETERS = {
+    "ITERATIONS": 10,
+    "GRID": {
+        "LR": reciprocal(1e-5, 1e-2),
+        "BATCH_SIZE": [16, 32, 64, 128],
+        "EPOCHS": [50, 100, 150],
+        "PATIENCE": [5, 10, 15],
+        "DROPOUT": [0.3, 0.5, 0.7],
+        "WEIGHT_DECAY": reciprocal(1e-4, 1e-2)
+    }
+}
 
-    # OUTER FOLDS
-    outer_train_subjects = [PATIENT_DATA[i] for i in train_idx]
-    outer_test_subjects = [PATIENT_DATA[i] for i in test_idx]
 
-    # === INNER LOOP ===
-    kf_inner = KFold(n_splits=INNER_K, shuffle=True, random_state=i_outer_fold)
 
-    best_inner_loss = float('inf')
-    best_model_config = None
+def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SUBJECT_LIST: SubjectList, OUTPUT_PATH: str, RANDOM_STATE: int = 1):
+    outer_folds = KFold(n_splits=OUTER_K, shuffle=True, random_state=RANDOM_STATE)
+    for i_OUTER, (i_outer_train, i_outer_test) in enumerate(outer_folds.split(SUBJECT_LIST.subjects)):
+        t_OUTER = default_timer()
+        OUTPUT = {
+            "train_indices": i_outer_train,
+            "test_indices": i_outer_test,
+            "summary": {},
+            "configs": {}
+        }
 
-    parameter_configs = list(ParameterSampler(PARAMETER_GRID, n_iter=PARAMETER_ITER, random_state=i_outer_fold))
-    for i_parameter_config, config in enumerate(parameter_configs):
-        print(f"    [CONFIG {i_parameter_config+1}/{PARAMETER_ITER}] | [LR: {config['LR']:.4f} | BS: {config['BATCH_SIZE']:02d} | E: {config['EPOCHS']:03d} | P: {config['PATIENCE']:02d} | D: {config['DROPOUT']} | WD: {config['WEIGHT_DECAY']:.4f}]")
-        fold_losses = []
+        outer_train_set = [SUBJECT_LIST[i] for i in i_outer_train]
+        outer_test_set = [SUBJECT_LIST[i] for i in i_outer_test]
 
-        for i_inner_fold, (inner_train_idx, inner_val_idx) in enumerate(kf_inner.split(outer_train_subjects)):
-            T_0 = default_timer()
-            print(f"        [INNER {i_inner_fold+1}/{INNER_K}] | ", end="")
+        inner_folds = KFold(n_splits=INNER_K, shuffle=True, random_state=i_OUTER)
+        CONFIGS = list(ParameterSampler(param_distributions=PARAMETERS_GRID, n_iter=PARAMETERS_N, random_state=i_OUTER))
+        for i_CONFIG, CONFIG in enumerate(CONFIGS):
+            t_CONFIG = default_timer()
 
-            inner_train_subjects = [outer_train_subjects[i] for i in inner_train_idx]
-            inner_val_subjects = [outer_train_subjects[i] for i in inner_val_idx]
+            OUTPUT["configs"][i_CONFIG+1] = {
+                "summary": {},
+                "hyperparameters": CONFIG,
+                "inner_folds": {}
+            }
 
-            inner_train_loader = DataLoader(SegmentDataset(inner_train_subjects), batch_size=config["BATCH_SIZE"], shuffle=True)
-            inner_val_loader = DataLoader(SegmentDataset(inner_val_subjects), batch_size=config["BATCH_SIZE"])
+            total_loss = 0
+            best_inner_loss = float('inf')
+            best_config = None
 
-            model = OSA_CNN().to(DEVICE)
-            optimiser = torch.optim.AdamW(params=model.parameters(), lr=config["LR"], weight_decay=config["WEIGHT_DECAY"])
+            for i_INNER, (i_inner_train, i_inner_val) in enumerate(inner_folds.split(outer_train_set)):
+                t_INNER = default_timer()
 
-            train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], patience=config["PATIENCE"], dataloader=inner_train_loader, val_dataloader=inner_val_loader)
-            val_loss = evaluate_model(model=model, device=DEVICE, dataloader=inner_val_loader)
-            fold_losses.append(val_loss)
+                inner_train_loader = DataLoader(SegmentDataset([outer_train_set[i] for i in i_inner_train]), batch_size=CONFIG["BATCH_SIZE"], shuffle=True)
+                inner_val_loader = DataLoader(SegmentDataset([outer_train_set[i] for i in i_inner_val]), batch_size=VAL_BATCH_SIZE)
 
-            print(f"L: {val_loss:.4f} | T: {f'{default_timer() - T_0:.5f}'[:6]}s")
+                model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=CONFIG["DROPOUT"]).to(device=DEVICE)
+                optimiser = optim.AdamW(params=model.parameters(), lr=CONFIG["LR"], weight_decay=CONFIG["WEIGHT_DECAY"])
 
-        mean_loss = sum(fold_losses) / len(fold_losses)
-        print(f"    [CONFIG {i_parameter_config+1}/{PARAMETER_ITER}] | Avg L: {mean_loss:.4f}")
+                epochs = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=CONFIG["EPOCHS"], patience=CONFIG["PATIENCE"], dataloader=inner_train_loader, val_dataloader=inner_val_loader)
+                loss = evaluate_model(model=model, device=DEVICE, dataloader=inner_val_loader, threshold=0.5)
+                total_loss += loss
 
-        if mean_loss < best_inner_loss:
-            best_inner_loss = mean_loss
-            best_model_config = config
-    
-    print(f"[OUTER {i_outer_fold+1}/{OUTER_K}] | ...", end="\r")
-    outer_train_loader = DataLoader(SegmentDataset(outer_train_subjects), batch_size=best_model_config["BATCH_SIZE"], shuffle=True)
-    model = OSA_CNN().to(DEVICE)
-    optimiser = torch.optim.AdamW(params=model.parameters(), lr=best_model_config["LR"], weight_decay=best_model_config["WEIGHT_DECAY"])
+                OUTPUT["configs"][i_CONFIG+1]["inner_folds"][i_INNER+1] = {
+                    "time": default_timer() - t_INNER,
+                    "epochs": epochs,
+                    "loss": loss
+                }
 
-    train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_model_config["EPOCHS"], patience=0, dataloader=outer_train_loader, val_dataloader=None)
+            mean_loss = total_loss / INNER_K
+            if mean_loss < best_inner_loss:
+                best_inner_loss = mean_loss
+                best_config = CONFIG
 
-    outer_test_loader = DataLoader(SegmentDataset(outer_test_subjects), batch_size=best_model_config["BATCH_SIZE"])
-    outer_test_metrics = evaluate_model_full(model=model, device=DEVICE, dataloader=outer_test_loader, threshold=0.5)
-    print(f"[OUTER {i_outer_fold+1}/{OUTER_K}] | L: {outer_test_metrics['loss']:.4f} | A: {outer_test_metrics['accuracy']:.4f}\n")
+            OUTPUT["configs"][i_CONFIG+1]["summary"] = {
+                "time": default_timer() - t_CONFIG,
+                "mean_loss": mean_loss
+            }
+        
+        outer_train_loader = DataLoader(SegmentDataset(outer_train_set), batch_size=best_config["BATCH_SIZE"], shuffle=True)
+        outer_test_loader = DataLoader(SegmentDataset(outer_test_set), batch_size=VAL_BATCH_SIZE, shuffle=False)
 
-    results.append({
-        "fold": i_outer_fold,
-        **outer_test_metrics
-    })
+        model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=best_config["DROPOUT"])
+        optimiser = optim.AdamW(params=model.parameters(), lr=best_config["LR"], weight_decay=best_config["WEIGHT_DECAY"])
+
+        train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], patience=best_config["PATIENCE"], dataloader=outer_train_loader)
+        performance = evaluate_model_full(model=model, device=DEVICE, dataloader=outer_test_loader, threshold=0.5)
+
+        OUTPUT["summary"] = {
+            "time": default_timer() - t_OUTER,
+            "best_config": best_config,
+            "performance": performance
+        }
+
+        with open(os.path.join(OUTPUT_PATH, f"MODEL{i_OUTER+1}.json"), "w") as file: json.dump(OUTPUT, file, indent=4)
+
+
+
+if __name__ == "__main__":
+    if not os.path.exists("output"): os.mkdir("output")
+    destination = os.path.join(os.path.abspath("output"), f"data-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    os.mkdir(destination)
+
+    OUTPUT_PATH = destination
+    SUBJECT_LIST = SubjectList(os.path.abspath("data"))
+    ncv(OUTER_K, INNER_K, PARAMETERS_DEBUG["ITERATIONS"], PARAMETERS_DEBUG["GRID"], SUBJECT_LIST, OUTPUT_PATH)
