@@ -1,3 +1,3 @@
-from .ecg_dataset import PatientDataset, SubjectData, SegmentDataset
+from .ecg_dataset import SubjectList, SegmentDataset
 
-__all__ = ["PatientDataset", "SubjectData", "SegmentDataset"]
+__all__ = ["SubjectList", "SegmentDataset"]
