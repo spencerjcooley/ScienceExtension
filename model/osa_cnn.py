@@ -10,7 +10,7 @@ class OSA_CNN(nn.Module):
         """
         PARAMETERS
         ---
-        convN_config: kernel size, features, stride, and padding for Nth convolutional layer
+        convN_config: kernel size, features, stride, and padding for Nth convolutional layer  \\
         linear_neurons: number of neurons in hidden layer
         dropout: dropout p
         """
