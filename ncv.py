@@ -18,25 +18,25 @@ VAL_BATCH_SIZE = 256
 
 # MAGIC NUMBERS
 NETWORK = {
-    "CONV1": (15,32,1,2),
-    "CONV2": (7,64,1,3),
-    "CONV3": (5,128,1,2),
+    "CONV1": [15,32,1,2],
+    "CONV2": [7,64,1,3],
+    "CONV3": [5,128,1,2],
     "LINEAR": 64
 }
 
 SMALL_NETWORK = {
-    "CONV1": (15,16,1,7),
-    "CONV2": (7,32,1,3),
-    "CONV3": (3,64,1,1),
+    "CONV1": [15,16,1,7],
+    "CONV2": [7,32,1,3],
+    "CONV3": [3,64,1,1],
     "LINEAR": 64
 }
 
 # PARAMETERS
 PARAMETERS_DEBUG = {
-    "ITERATIONS": 1,
+    "ITERATIONS": 2,
     "GRID": {
         "LR": reciprocal(1e-5, 1e-2),
-        "BATCH_SIZE": [32, 64, 128],
+        "BATCH_SIZE": [128],
         "EPOCHS": [1],
         "PATIENCE": [5, 10, 15],
         "DROPOUT": [0.3, 0.5, 0.7],
@@ -58,16 +58,17 @@ PARAMETERS = {
 
 
 
-def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SUBJECT_LIST: SubjectList, OUTPUT_PATH: str, RANDOM_STATE: int = 1):
+def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SUBJECT_LIST: SubjectList, OUTPUT_PATH: str, RANDOM_STATE: int = 1, SMALL_MODEL: bool = False):
     print(
-"""┏━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┓
-┃ OUTER ┃ CONFIGURATION ┃ INNER ┃  ELAPSED  ┃    LOSS    ┃
-┗━━━━━━━┻━━━━━━━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━━━━┛
-┏━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┓"""
-    )
+"""┏━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ OUTER ┃ CONFIGURATION ┃ INNER ┃  ELAPSED  ┃  EPOCH  ┃    LOSS    ┃
+┗━━━━━━━┻━━━━━━━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┛""")
 
     outer_folds = KFold(n_splits=OUTER_K, shuffle=True, random_state=RANDOM_STATE)
     for i_OUTER, (i_outer_train, i_outer_test) in enumerate(outer_folds.split(SUBJECT_LIST.subjects)):
+        print("┏━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┓")
+        print("┗━━━━━━━┻━━━━━━━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┛", end="\r")
+
         t_OUTER = default_timer()
         OUTPUT = {
             "train_indices": i_outer_train.tolist(),
@@ -81,6 +82,7 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
 
         best_inner_loss = float('inf')
         best_config = None
+        i_best_config = None
 
         inner_folds = KFold(n_splits=INNER_K, shuffle=True, random_state=i_OUTER)
         CONFIGS = list(ParameterSampler(param_distributions=PARAMETERS_GRID, n_iter=PARAMETERS_N, random_state=i_OUTER))
@@ -101,7 +103,8 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
                 inner_train_loader = DataLoader(SegmentDataset([outer_train_set[i] for i in i_inner_train]), batch_size=CONFIG["BATCH_SIZE"], shuffle=True)
                 inner_val_loader = DataLoader(SegmentDataset([outer_train_set[i] for i in i_inner_val]), batch_size=VAL_BATCH_SIZE)
 
-                model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=CONFIG["DROPOUT"]).to(device=DEVICE)
+                if SMALL_MODEL: model = OSA_CNN(conv1_config=SMALL_NETWORK["CONV1"], conv2_config=SMALL_NETWORK["CONV2"], conv3_config=SMALL_NETWORK["CONV3"], linear_neurons=SMALL_NETWORK["LINEAR"], dropout=CONFIG["DROPOUT"]).to(device=DEVICE)
+                else: model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=CONFIG["DROPOUT"]).to(device=DEVICE)
                 optimiser = optim.AdamW(params=model.parameters(), lr=CONFIG["LR"], weight_decay=CONFIG["WEIGHT_DECAY"])
 
                 epochs = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=CONFIG["EPOCHS"], patience=CONFIG["PATIENCE"], dataloader=inner_train_loader, val_dataloader=inner_val_loader)
@@ -115,9 +118,11 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
                     "loss": loss
                 }
 
-                print(f"┃  {i_OUTER+1}/{OUTER_K}  ┃     {i_CONFIG+1:02d}/{PARAMETERS_N:02d}     ┃  {i_INNER+1}/{INNER_K}  ┃  {f'{elapsed_time}'[:8]}  ┃  {f'{loss}'[:7]}  ┃")
+                if i_CONFIG == 0 and i_INNER == 0: print(f"┃  {i_OUTER+1}/{OUTER_K}  ┃     {i_CONFIG+1:02d}/{PARAMETERS_N:02d}     ┃  {i_INNER+1}/{INNER_K}  ┃  {f'{elapsed_time}'[:7]}  ┃   {epochs:03d}   ┃  {f'{loss}'[:8]}  ┃")
+                elif i_INNER == 0: print(f"┃       ┃     {i_CONFIG+1:02d}/{PARAMETERS_N:02d}     ┃  {i_INNER+1}/{INNER_K}  ┃  {f'{elapsed_time}'[:7]}  ┃   {epochs:03d}   ┃  {f'{loss}'[:8]}  ┃")
+                elif i_INNER != 0: print(f"┃       ┃       -       ┃  {i_INNER+1}/{INNER_K}  ┃  {f'{elapsed_time}'[:7]}  ┃   {epochs:03d}   ┃  {f'{loss}'[:8]}  ┃")
+                print("┗━━━━━━━┻━━━━━━━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┛", end="\r")
             
-            print("┣━━━━━━━╋━━━━━━━━━━━━━━━╋━━━━━━━╋━━━━━━━━━━━╋━━━━━━━━━━━━┫")
             mean_loss = total_loss / INNER_K
             if mean_loss < best_inner_loss:
                 best_inner_loss = mean_loss
@@ -129,22 +134,34 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
                 "mean_loss": mean_loss
             }
         
+        print("┣━━━━━━━╋━━━━━━━━━━━━━━━╋━━━━━━━╋━━━━━━━━━━━╋━━━━━━━━━╋━━━━━━━━━━━━┫")
+        print("┗━━━━━━━┻━━━━━━━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┛", end="\r")
+        
+        t_TEST = default_timer()
         outer_train_loader = DataLoader(SegmentDataset(outer_train_set), batch_size=best_config["BATCH_SIZE"], shuffle=True)
         outer_test_loader = DataLoader(SegmentDataset(outer_test_set), batch_size=VAL_BATCH_SIZE, shuffle=False)
 
-        model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=best_config["DROPOUT"]).to(device=DEVICE)
+        if SMALL_MODEL: model = OSA_CNN(conv1_config=SMALL_NETWORK["CONV1"], conv2_config=SMALL_NETWORK["CONV2"], conv3_config=SMALL_NETWORK["CONV3"], linear_neurons=SMALL_NETWORK["LINEAR"], dropout=best_config["DROPOUT"]).to(device=DEVICE)
+        else: model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=best_config["DROPOUT"]).to(device=DEVICE)
         optimiser = optim.AdamW(params=model.parameters(), lr=best_config["LR"], weight_decay=best_config["WEIGHT_DECAY"])
 
-        train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], patience=best_config["PATIENCE"], dataloader=outer_train_loader)
+        epochs = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], patience=best_config["PATIENCE"], dataloader=outer_train_loader)
         performance = evaluate_model_full(model=model, device=DEVICE, dataloader=outer_test_loader, threshold=0.5)
+        outer_loss = performance['loss']
 
         OUTPUT["summary"] = {
+            "network": SMALL_NETWORK if SMALL_MODEL else NETWORK,
             "time": default_timer() - t_OUTER,
             "best_config": best_config,
             "performance": performance
         }
 
         with open(os.path.join(OUTPUT_PATH, f"MODEL{i_OUTER+1}.json"), "w") as file: json.dump(OUTPUT, file, indent=4)
+
+        print(f"┃  {i_OUTER+1}/{OUTER_K}  ┃     {i_best_config+1:02d}/{PARAMETERS_N:02d}     ┃   -   ┃  {f'{default_timer() - t_TEST}'[:7]}  ┃   {epochs:03d}   ┃  {f'{outer_loss}'[:8]}  ┃")
+        print("┣━━━━━━━╋━━━━━━━━━━━━━━━╋━━━━━━━╋━━━━━━━━━━━╋━━━━━━━━━╋━━━━━━━━━━━━┫")
+        print(f"┃ TOTAL ┃       -       ┃   -   ┃  {f'{default_timer() - t_OUTER}'[:7]}  ┃    -    ┃     --     ┃")
+        print("┗━━━━━━━┻━━━━━━━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┛")
 
 
 
@@ -155,4 +172,4 @@ if __name__ == "__main__":
 
     OUTPUT_PATH = destination
     SUBJECT_LIST = SubjectList(os.path.abspath("data"))
-    ncv(OUTER_K, INNER_K, PARAMETERS_DEBUG["ITERATIONS"], PARAMETERS_DEBUG["GRID"], SUBJECT_LIST, OUTPUT_PATH)
+    ncv(OUTER_K, INNER_K, PARAMETERS_DEBUG["ITERATIONS"], PARAMETERS_DEBUG["GRID"], SUBJECT_LIST, OUTPUT_PATH, RANDOM_STATE=10, SMALL_MODEL=True)
