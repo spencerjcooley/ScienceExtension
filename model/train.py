@@ -28,11 +28,7 @@ class FocalLoss(Module):
 
 loss_function = FocalLoss(alpha=0.9, gamma=2.0)
 
-def train_model(model, optimiser, device, epochs, patience, dataloader, val_dataloader=None):
-    best_model_state = None
-    best_f1 = 0
-    epochs_no_improvement = 0
-
+def train_model(model, optimiser, device, epochs, patience, dataloader):
     scaler = GradScaler(device=device)
 
     for epoch in range(epochs):
@@ -52,23 +48,6 @@ def train_model(model, optimiser, device, epochs, patience, dataloader, val_data
             scaler.step(optimiser)
             scaler.update()
 
-        if val_dataloader is not None:
-            performance = evaluate_model(model=model, device=device, dataloader=val_dataloader)
-
-            if performance["f1"] > best_f1:
-                best_f1 = performance["f1"]
-                best_model_state = deepcopy(model.state_dict())
-                epochs_no_improvement = 0
-            else:
-                epochs_no_improvement += 1
-
-            if epochs_no_improvement >= patience:
-                return epoch + 1
-
-        if val_dataloader is not None and best_model_state is not None:
-            model.load_state_dict(best_model_state)
-
-    return epochs
 
 
 def evaluate_model(model, device, dataloader, threshold=0.5):
