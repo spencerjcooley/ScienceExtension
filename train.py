@@ -18,6 +18,9 @@ def train_model(model, optimiser, device, epochs, patience, dataloader, val_data
             logits = model(x_batch).squeeze(1)
             loss = loss_function(logits, y_batch)
             loss.backward()
+
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
+
             optimiser.step()
 
         if val_dataloader is not None:
