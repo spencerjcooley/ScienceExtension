@@ -1,11 +1,12 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch.nn import Module
+from torch.nn.utils import clip_grad_norm_
+from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.amp import autocast, GradScaler
+from torch import sigmoid, no_grad
 from copy import deepcopy
 
 
-class FocalLoss(nn.Module):
+class FocalLoss(Module):
     def __init__(self, alpha, gamma, reduction = 'mean'):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
@@ -13,9 +14,9 @@ class FocalLoss(nn.Module):
         self.reduction = reduction
 
     def forward(self, logits, targets):
-        probabilities = torch.sigmoid(logits)
-        bce_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
-        p_t = probabilities * targets + (1 - probabilities) * (1 - targets)  # pt = p if y == 1 else 1 - p
+        probabilities = sigmoid(logits)
+        bce_loss = binary_cross_entropy_with_logits(logits, targets, reduction='none')
+        p_t = probabilities * targets + (1 - probabilities) * (1 - targets)
         alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
         focal_loss = alpha_t * (1 - p_t) ** self.gamma * bce_loss
 
@@ -47,7 +48,7 @@ def train_model(model, optimiser, device, epochs, patience, dataloader, val_data
                 loss = loss_function(logits, y_batch)
 
             scaler.scale(loss).backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
+            clip_grad_norm_(model.parameters(), max_norm=1)
             scaler.step(optimiser)
             scaler.update()
 
@@ -75,7 +76,7 @@ def evaluate_model(model, device, dataloader, threshold=0.5):
     TP, TN, FP, FN = 0, 0, 0, 0
 
     model.eval()
-    with torch.no_grad():
+    with no_grad():
         for x_batch, y_batch in dataloader:
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
@@ -87,7 +88,7 @@ def evaluate_model(model, device, dataloader, threshold=0.5):
             total_loss += loss.item() * x_batch.size(0)
             total_segments += x_batch.size(0)
 
-            probabilities = torch.sigmoid(logits)
+            probabilities = sigmoid(logits)
             predictions = (probabilities >= threshold).float()
 
             TP += ((predictions == 1) & (y_batch == 1)).sum().item()
