@@ -3,12 +3,14 @@ from datetime import datetime
 
 from torch import device, cuda
 from scipy.stats import reciprocal
+from sklearn.model_selection import KFold
 
 from data import SubjectList, SegmentDataset
 from model import DynamicCNN
 from model import train_model, evaluate_model
 
 # === SETTINGS ===
+START_TIME = datetime.now()
 DEVICE = device("cuda" if cuda.is_available() else "cpu")
 OUTER_K, INNER_K = 5, 4
 RANDOM_STATE = 10
@@ -69,14 +71,38 @@ HYPERPARAMETERS = {
     }
 }
 
-def ncv(inner_k: int, outer_k: int, network_architecture: list[dict], hyperparameter_set: dict, subject_list: SubjectList, output_path: str, random_state: int = 1):
-    pass
+
+
+# === NESTED CROSS VALIDATION ===
+def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: dict, subject_list: SubjectList, output_path: str, random_state: int = 1):
+    NETWORK = NETWORKS[network_type]
+
+    # === OVERVIEW HEADER ===
+    print(f"""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ NCV TEST {START_TIME.strftime('[%Y-%m-%d] [%H:%M:%S]')}                           ┃
+┃                                                            ┃
+┃ TRAINING CONFIGURATION                                     ┃
+┃     OUTER FOLDS [{OUTER_K}]                                        ┃
+┃     INNER FOLDS [{INNER_K}]                                        ┃
+┃                                                            ┃
+┃ MODEL CONFIGURATION [{network_type}]{' '*(37-len(network_type))}┃""")
+    
+    for i, layer in enumerate(NETWORK):
+        if i == 0: print(f"┃     {layer['type'].upper()}{' '*(55-len(layer['type']))}┃")
+        else: print(f"┃     → {layer['type'].upper()}{' '*(53-len(layer['type']))}┃")
+
+    print("""┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ OUTER ┃ CONFIGS ┃ INNER ┃  ELAPSED  ┃  EPOCH  ┃    LOSS    ┃
+┗━━━━━━━┻━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┛""")
+
+
 
 if __name__ == "__main__":
-    destination = path.join(path.abspath("output"), f"data-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    destination = path.join(path.abspath("output"), f"data-{START_TIME.strftime('%Y%m%d-%H%M%S')}")
     mkdir(destination)
 
     OUTPUT_PATH = destination
     SUBJECT_LIST = SubjectList(path.abspath("data"))
 
-    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_architecture=NETWORKS["DEBUG"], hyperparameter_set=HYPERPARAMETERS["DEBUG"], subject_list=SUBJECT_LIST, output_path=destination, random_state=RANDOM_STATE)
+    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="MAIN", hyperparameter_set=HYPERPARAMETERS["DEBUG"], subject_list=SUBJECT_LIST, output_path=destination, random_state=RANDOM_STATE)
