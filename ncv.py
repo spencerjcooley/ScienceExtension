@@ -1,9 +1,10 @@
 from os import path, mkdir
 from datetime import datetime
+from timeit import default_timer
 
 from torch import device, cuda
 from scipy.stats import reciprocal
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, ParameterSampler
 
 from data import SubjectList, SegmentDataset
 from model import DynamicCNN
@@ -49,24 +50,21 @@ NETWORKS = {
 
 HYPERPARAMETERS = {
     "MAIN": {
-        "ITERATIONS": 10,
-            "ITERATIONS": 15,
+        "ITERATIONS": 55,
         "GRID": {
             "LR": reciprocal(1e-5, 1e-4),
             "BATCH_SIZE": [16, 32, 64],
-            "EPOCHS": [50, 100, 150],
-            "PATIENCE": [5, 10, 15],
+            "EPOCHS": [20, 35, 60, 100],
             "WEIGHT_DECAY": reciprocal(1e-5, 1e-3)
         }
     },
     "DEBUG": {
         "ITERATIONS": 2,
         "GRID": {
-            "LR": reciprocal(1e-4, 1e-3),
+            "LR": reciprocal(1e-5, 1e-4),
             "BATCH_SIZE": [128],
             "EPOCHS": [5],
-            "PATIENCE": [1, 2, 3],
-            "WEIGHT_DECAY": reciprocal(1e-4, 1e-2)
+            "WEIGHT_DECAY": reciprocal(1e-5, 1e-3)
         }
     }
 }
@@ -74,27 +72,49 @@ HYPERPARAMETERS = {
 
 
 # === NESTED CROSS VALIDATION ===
-def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: dict, subject_list: SubjectList, output_path: str, random_state: int = 1):
-    NETWORK = NETWORKS[network_type]
+def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, subject_list: SubjectList, output_path: str, random_state: int = 1):
+    t_ncv = default_timer()
+    network, hyperparameters = NETWORKS[network_type], HYPERPARAMETERS[hyperparameter_set]
 
     # === OVERVIEW HEADER ===
-    print(f"""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ NCV TEST {START_TIME.strftime('[%Y-%m-%d] [%H:%M:%S]')}                           ┃
-┃                                                            ┃
-┃ TRAINING CONFIGURATION                                     ┃
-┃     OUTER FOLDS [{OUTER_K}]                                        ┃
-┃     INNER FOLDS [{INNER_K}]                                        ┃
-┃                                                            ┃
-┃ MODEL CONFIGURATION [{network_type}]{' '*(37-len(network_type))}┃""")
+    print(f"""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ NCV TEST {START_TIME.strftime('[%Y-%m-%d] [%H:%M:%S]')}                                        ┃
+┃                                                                         ┃
+┃ TRAINING CONFIGURATION                                                  ┃
+┃     OUTER FOLDS [{OUTER_K}]                                                     ┃
+┃     INNER FOLDS [{INNER_K}]                                                     ┃
+┃                                                                         ┃
+┃ MODEL CONFIGURATION [{network_type}]{' '*(50-len(network_type))}┃""")
     
-    for i, layer in enumerate(NETWORK):
-        if i == 0: print(f"┃     {layer['type'].upper()}{' '*(55-len(layer['type']))}┃")
-        else: print(f"┃     → {layer['type'].upper()}{' '*(53-len(layer['type']))}┃")
+    for i, layer in enumerate(network):
+        if i == 0: print(f"┃     {layer['type'].upper()}{' '*(68-len(layer['type']))}┃")
+        else: print(f"┃     → {layer['type'].upper()}{' '*(66-len(layer['type']))}┃")
 
-    print("""┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-┏━━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┓
-┃ OUTER ┃ CONFIGS ┃ INNER ┃  ELAPSED  ┃  EPOCH  ┃    LOSS    ┃
-┗━━━━━━━┻━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┛""")
+    print("""┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ OUTER ┃ CONFIGS ┃ INNER ┃  ELAPSED  ┃  EPOCH  ┃    LOSS    ┃     F1     ┃
+┗━━━━━━━┻━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┻━━━━━━━━━━━━┛""")
+    
+
+
+    # === OUTER FOLDS ===
+
+    # Split data patient wise into K folds for outer CV loop
+    outer_folds = KFold(n_splits=outer_k, shuffle=True, random_state=random_state)
+    for i_outer, (i_outer_train, i_outer_test) in enumerate(outer_folds.split(subject_list.subjects)):
+        t_outer = default_timer()
+
+        # Create list of custom SubjectData objects (in data/ecg_dataset.py)
+        outer_train_set = [subject_list[i] for i in i_outer_train]
+        outer_test_set = [subject_list[i] for i in i_outer_test]
+
+        # Create hyperparameter configurations + inner fold split for inner cross validation
+        inner_folds = KFold(n_splits=inner_k, shuffle=True, random_state=i_outer)
+        configs = list(ParameterSampler(hyperparameters["GRID"], hyperparameters["ITERATIONS"], random_state=i_outer))
+        for i_config, config in enumerate(configs):
+            
+            inner_train_set = [subject_list[i] for i in i_outer_train]
+            inner_val_set = [subject_list[i] for i in i_outer_test]
 
 
 
@@ -105,4 +125,4 @@ if __name__ == "__main__":
     OUTPUT_PATH = destination
     SUBJECT_LIST = SubjectList(path.abspath("data"))
 
-    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="MAIN", hyperparameter_set=HYPERPARAMETERS["DEBUG"], subject_list=SUBJECT_LIST, output_path=destination, random_state=RANDOM_STATE)
+    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="DEBUG", hyperparameter_set="DEBUG", subject_list=SUBJECT_LIST, output_path=destination, random_state=RANDOM_STATE)
