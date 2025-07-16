@@ -5,7 +5,7 @@ from datetime import datetime
 
 from train import train_model, evaluate_model, evaluate_model_full
 from data import SubjectList, SegmentDataset
-from model import OSA_CNN
+from model import OSA_CNN, OSA_CNN_SMALL
 
 from torch import device, cuda, optim
 from torch.utils.data import DataLoader
@@ -16,51 +16,67 @@ DEVICE = device("cuda" if cuda.is_available() else "cpu")
 OUTER_K, INNER_K = 5, 4
 VAL_BATCH_SIZE = 256
 
-# MAGIC NUMBERS
-NETWORK = {
-    "CONV1": [15,32,1,2],
-    "CONV2": [7,64,1,3],
-    "CONV3": [5,128,1,2],
-    "LINEAR": 64
-}
-
-SMALL_NETWORK = {
-    "CONV1": [15,16,1,7],
-    "CONV2": [7,32,1,3],
-    "CONV3": [3,64,1,1],
-    "LINEAR": 64
+NETWORKS = {
+    0: {
+        "CONV1": [15,32,1,2],
+        "CONV2": [7,64,1,3],
+        "CONV3": [5,128,1,2],
+        "LINEAR": 64
+    },
+    1: {
+        "CONV1": [15,16,1,7],
+        "CONV2": [7,32,1,3],
+        "CONV3": [3,64,1,1],
+        "LINEAR": 32
+    },
+    2: {
+        "CONV1": [21,32,1,10],
+        "CONV2": [15,64,1,7],
+        "LINEAR": 64
+    }
 }
 
 # PARAMETERS
 PARAMETERS_DEBUG = {
     "ITERATIONS": 2,
     "GRID": {
-        "LR": reciprocal(1e-5, 1e-2),
+        "LR": reciprocal(1e-4, 1e-3),
         "BATCH_SIZE": [128],
         "EPOCHS": [1],
         "PATIENCE": [5, 10, 15],
-        "DROPOUT": [0.3, 0.5, 0.7],
+        "DROPOUT": [0.1, 0.2, 0.3],
         "WEIGHT_DECAY": reciprocal(1e-4, 1e-2)
     }
 }
 
 PARAMETERS = {
-    "ITERATIONS": 10,
+    "ITERATIONS": 15,
     "GRID": {
-        "LR": reciprocal(1e-5, 1e-2),
-        "BATCH_SIZE": [16, 32, 64, 128],
+        "LR": reciprocal(1e-5, 1e-4),
+        "BATCH_SIZE": [16, 32, 64],
         "EPOCHS": [50, 100, 150],
         "PATIENCE": [5, 10, 15],
-        "DROPOUT": [0.3, 0.5, 0.7],
-        "WEIGHT_DECAY": reciprocal(1e-4, 1e-2)
+        "DROPOUT": [0.1, 0.2, 0.3],
+        "WEIGHT_DECAY": reciprocal(1e-5, 1e-3)
     }
 }
 
 
 
-def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SUBJECT_LIST: SubjectList, OUTPUT_PATH: str, RANDOM_STATE: int = 1, SMALL_MODEL: bool = False):
-    print(
-"""┏━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┓
+def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SUBJECT_LIST: SubjectList, OUTPUT_PATH: str, RANDOM_STATE: int = 1, MODEL_ID: int = 0):
+    NETWORK = NETWORKS[MODEL_ID]
+    print(f"""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ TRAINING CONFIGURATION                                           ┃
+┃     OUTER FOLDS: {OUTER_K}                                               ┃
+┃     INNER FOLDS: {INNER_K}                                               ┃
+┃                                                                  ┃
+┃ MODEL CONFIGURATION | {MODEL_ID}                                          ┃""")
+
+    for key, value in NETWORK.items():
+        string = f"{key}: {value}"
+        print(f"┃     {string}{' '*(61-len(string))}┃")
+
+    print("""┣━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┫
 ┃ OUTER ┃ CONFIGURATION ┃ INNER ┃  ELAPSED  ┃  EPOCH  ┃    LOSS    ┃
 ┗━━━━━━━┻━━━━━━━━━━━━━━━┻━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━┻━━━━━━━━━━━━┛""")
 
@@ -102,9 +118,9 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
 
                 inner_train_loader = DataLoader(SegmentDataset([outer_train_set[i] for i in i_inner_train]), batch_size=CONFIG["BATCH_SIZE"], shuffle=True)
                 inner_val_loader = DataLoader(SegmentDataset([outer_train_set[i] for i in i_inner_val]), batch_size=VAL_BATCH_SIZE)
-
-                if SMALL_MODEL: model = OSA_CNN(conv1_config=SMALL_NETWORK["CONV1"], conv2_config=SMALL_NETWORK["CONV2"], conv3_config=SMALL_NETWORK["CONV3"], linear_neurons=SMALL_NETWORK["LINEAR"], dropout=CONFIG["DROPOUT"]).to(device=DEVICE)
-                else: model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=CONFIG["DROPOUT"]).to(device=DEVICE)
+                
+                if len(NETWORK.keys()) == 4: model = OSA_CNN(conv1_config=NETWORKS[MODEL_ID]["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=CONFIG["DROPOUT"]).to(device=DEVICE)
+                else: model = OSA_CNN_SMALL(conv1_config=NETWORKS[MODEL_ID]["CONV1"], conv2_config=NETWORK["CONV2"], linear_neurons=NETWORK["LINEAR"], dropout=CONFIG["DROPOUT"]).to(device=DEVICE)
                 optimiser = optim.AdamW(params=model.parameters(), lr=CONFIG["LR"], weight_decay=CONFIG["WEIGHT_DECAY"])
 
                 epochs = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=CONFIG["EPOCHS"], patience=CONFIG["PATIENCE"], dataloader=inner_train_loader, val_dataloader=inner_val_loader)
@@ -141,8 +157,8 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
         outer_train_loader = DataLoader(SegmentDataset(outer_train_set), batch_size=best_config["BATCH_SIZE"], shuffle=True)
         outer_test_loader = DataLoader(SegmentDataset(outer_test_set), batch_size=VAL_BATCH_SIZE, shuffle=False)
 
-        if SMALL_MODEL: model = OSA_CNN(conv1_config=SMALL_NETWORK["CONV1"], conv2_config=SMALL_NETWORK["CONV2"], conv3_config=SMALL_NETWORK["CONV3"], linear_neurons=SMALL_NETWORK["LINEAR"], dropout=best_config["DROPOUT"]).to(device=DEVICE)
-        else: model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=best_config["DROPOUT"]).to(device=DEVICE)
+        if len(NETWORK.keys()) == 4: model = OSA_CNN(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], conv3_config=NETWORK["CONV3"], linear_neurons=NETWORK["LINEAR"], dropout=best_config["DROPOUT"]).to(device=DEVICE)
+        else: model = OSA_CNN_SMALL(conv1_config=NETWORK["CONV1"], conv2_config=NETWORK["CONV2"], linear_neurons=NETWORK["LINEAR"], dropout=best_config["DROPOUT"]).to(device=DEVICE)
         optimiser = optim.AdamW(params=model.parameters(), lr=best_config["LR"], weight_decay=best_config["WEIGHT_DECAY"])
 
         epochs = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], patience=best_config["PATIENCE"], dataloader=outer_train_loader)
@@ -150,7 +166,10 @@ def ncv(OUTER_K: int, INNER_K: int, PARAMETERS_N: int, PARAMETERS_GRID: dict, SU
         outer_loss = performance['loss']
 
         OUTPUT["summary"] = {
-            "network": SMALL_NETWORK if SMALL_MODEL else NETWORK,
+            "model": {
+                "id": MODEL_ID,
+                "network": NETWORK
+            },
             "time": default_timer() - t_OUTER,
             "best_config": best_config,
             "performance": performance
@@ -172,4 +191,4 @@ if __name__ == "__main__":
 
     OUTPUT_PATH = destination
     SUBJECT_LIST = SubjectList(os.path.abspath("data"))
-    ncv(OUTER_K, INNER_K, PARAMETERS["ITERATIONS"], PARAMETERS["GRID"], SUBJECT_LIST, OUTPUT_PATH, RANDOM_STATE=10, SMALL_MODEL=True)
+    ncv(OUTER_K, INNER_K, PARAMETERS["ITERATIONS"], PARAMETERS["GRID"], SUBJECT_LIST, OUTPUT_PATH, RANDOM_STATE=10, MODEL_ID=2)
