@@ -1,63 +1,76 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.amp import autocast, GradScaler
 from copy import deepcopy
 
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha, gamma, reduction = 'mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, logits, targets):
+        probabilities = torch.sigmoid(logits)
+        bce_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
+        p_t = probabilities * targets + (1 - probabilities) * (1 - targets)  # pt = p if y == 1 else 1 - p
+        alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        focal_loss = alpha_t * (1 - p_t) ** self.gamma * bce_loss
+
+        if self.reduction == 'mean': return focal_loss.mean()
+        elif self.reduction == 'sum': return focal_loss.sum()
+        else: return focal_loss
+
+
+
+loss_function = FocalLoss(alpha=0.9, gamma=2.0)
+
 def train_model(model, optimiser, device, epochs, patience, dataloader, val_dataloader=None):
-    loss_function = nn.BCEWithLogitsLoss()
     best_model_state = None
-    best_val_loss = float('inf')
+    best_f1 = 0
     epochs_no_improvement = 0
 
-    model.train()
+    scaler = GradScaler(device=device)
+
     for epoch in range(epochs):
+        model.train()
         for x_batch, y_batch in dataloader:
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
 
             optimiser.zero_grad()
-            logits = model(x_batch).squeeze(1)
-            loss = loss_function(logits, y_batch)
-            loss.backward()
 
+            with autocast(device_type=device):
+                logits = model(x_batch).squeeze(1)
+                loss = loss_function(logits, y_batch)
+
+            scaler.scale(loss).backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
-
-            optimiser.step()
+            scaler.step(optimiser)
+            scaler.update()
 
         if val_dataloader is not None:
-            val_loss = evaluate_model(model=model, device=device, dataloader=val_dataloader)
+            performance = evaluate_model(model=model, device=device, dataloader=val_dataloader)
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if performance["f1"] > best_f1:
+                best_f1 = performance["f1"]
                 best_model_state = deepcopy(model.state_dict())
                 epochs_no_improvement = 0
-            else: epochs_no_improvement += 1
+            else:
+                epochs_no_improvement += 1
 
-            if epochs_no_improvement >= patience: return epoch + 1
+            if epochs_no_improvement >= patience:
+                return epoch + 1
 
-        if val_dataloader is not None and best_model_state is not None: model.load_state_dict(best_model_state)
+        if val_dataloader is not None and best_model_state is not None:
+            model.load_state_dict(best_model_state)
 
     return epochs
 
-def evaluate_model(model, device, dataloader):
-    loss_function = nn.BCEWithLogitsLoss()
-    total_loss, total_segments = 0.0, 0
 
-    model.eval()
-    with torch.no_grad():
-        for x_batch, y_batch in dataloader:
-            x_batch = x_batch.to(device)
-            y_batch = y_batch.to(device)
-
-            logits = model(x_batch).squeeze(1)
-            loss = loss_function(logits, y_batch)
-
-            total_loss += loss.item() * x_batch.size(0)
-            total_segments += x_batch.size(0)
-    
-    return total_loss / total_segments
-
-def evaluate_model_full(model, device, dataloader, threshold=0.5):
-    loss_function = nn.BCEWithLogitsLoss()
+def evaluate_model(model, device, dataloader, threshold=0.5):
     total_loss, total_segments = 0.0, 0
     TP, TN, FP, FN = 0, 0, 0, 0
 
@@ -67,14 +80,13 @@ def evaluate_model_full(model, device, dataloader, threshold=0.5):
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
 
-            logits = model(x_batch).squeeze(1)
-            loss = loss_function(logits, y_batch)
+            with autocast(device_type=device):
+                logits = model(x_batch).squeeze(1)
+                loss = loss_function(logits, y_batch)
 
-            # Calculate Loss
             total_loss += loss.item() * x_batch.size(0)
             total_segments += x_batch.size(0)
 
-            # Get Confusion Matrix
             probabilities = torch.sigmoid(logits)
             predictions = (probabilities >= threshold).float()
 
@@ -83,11 +95,11 @@ def evaluate_model_full(model, device, dataloader, threshold=0.5):
             FP += ((predictions == 1) & (y_batch == 0)).sum().item()
             FN += ((predictions == 0) & (y_batch == 1)).sum().item()
     
-    accuracy = (TP+TN)/(TP+TN+FP+FN) if (TP + TN + FP + FN) > 0 else 0
-    precision = (TP)/(TP+FP) if (TP + FP) > 0 else 0
-    recall = (TP)/(TP+FN) if (TP + FN) > 0 else 0
-    specificity = (TN)/(TN+FP) if (TN + FP) > 0 else 0
-    f1 = 2*(precision*recall)/(precision+recall) if precision + recall > 0 else 0
+    accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else 0
+    precision = TP / (TP + FP) if (TP + FP) > 0 else 0
+    recall = TP / (TP + FN) if (TP + FN) > 0 else 0
+    specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
 
     return {
         "loss": total_loss / total_segments,
