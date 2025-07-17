@@ -53,7 +53,10 @@ NETWORKS = {
         {"type": "linear", "in_features": 64, "out_features": 1}
     ],
     "BASIC": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 21, "stride": 1, "padding": 10},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 32},
+        {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 17, "stride": 1, "padding": 8},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 32},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
@@ -73,7 +76,7 @@ NETWORKS = {
 
 HYPERPARAMETERS = {
     "MAIN": {
-        "ITERATIONS": round(log(ALPHA)/log((TARGET_PERCENTILE/100))), # Iteration estimation via X~Bin(n,p)
+        "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))), # Iteration estimation via X~Bin(n,p) | Ceiling Function
         "GRID": {
             "LR": insert_logarithmic_means(start=1e-5, end=1e-4, n_means=3, is_int=False),
             "BATCH_SIZE": insert_logarithmic_means(start=16, end=128, n_means=2),
@@ -111,7 +114,7 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 ┃     CONFIDENCE [{int((1-ALPHA)*100):02d}%]                                                    ┃
 ┃     PERCENTILE [{TARGET_PERCENTILE:02d}th]                                                   ┃
 ┃     ITERATIONS [{hyperparameters['ITERATIONS']:02d}]                                                     ┃
-┃     COVERAGE [{hyperparameters['ITERATIONS']*100//prod([len(options) for options in hyperparameters["GRID"].values()]):02d}%]                                                      ┃
+┃     COVERAGE [{round(hyperparameters['ITERATIONS'] / prod([len(options) for options in hyperparameters["GRID"].values()]) * 100):02d}%]                                                      ┃
 ┃                                                                         ┃
 ┃ MODEL CONFIGURATION [{network_type}]{' '*(50-len(network_type))}┃""")
     
@@ -167,5 +170,30 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 
 
 
+def standard(network_type: str, lr: float, batch_size: int, epochs: int, weight_decay: float, train_proportion: float, subject_list: SubjectList):
+    network = NETWORKS[network_type]
+
+    # === OVERVIEW HEADER ===
+    print(f"""
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ STANDARD TEST {START_TIME.strftime('[%Y-%m-%d] [%H:%M:%S]')}       ┃
+┃                                             ┃
+┃ MODEL CONFIGURATION [{network_type}]{' '*(22-len(network_type))}┃""")
+    
+    for i, layer in enumerate(network):
+        if i == 0: print(f"┃     {layer['type'].upper()}{' '*(40-len(layer['type']))}┃")
+        else: print(f"┃     → {layer['type'].upper()}{' '*(38-len(layer['type']))}┃")
+
+    print("""┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+┏━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ EPOCH ┃  ELAPSED  ┃    LOSS    ┃     F1     ┃
+┗━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━━━━┻━━━━━━━━━━━━┛""")
+
+    for epoch in range(epochs):
+        print(epoch)
+
+
+
 if __name__ == "__main__":
-    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="DEBUG", hyperparameter_set="DEBUG", subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
+    standard(network_type="MAIN", lr=1e-5, batch_size=64, epochs=50, weight_decay=1e-5, train_proportion=0.8, subject_list=SUBJECT_LIST)
+    # ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="MAIN", hyperparameter_set="MAIN", subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
