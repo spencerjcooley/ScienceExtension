@@ -37,7 +37,7 @@ OUTER_K, INNER_K = 5, 4
 RANDOM_STATE = 10
 
 ALPHA = 0.05 # > 0
-TARGET_PERCENTILE = 95 # < 100
+TARGET_PERCENTILE = 90 # < 100
 
 NETWORKS = {
     "MAIN": [
@@ -84,10 +84,10 @@ HYPERPARAMETERS = {
     "DEBUG": {
         "ITERATIONS": 2,
         "GRID": {
-            "LR": reciprocal(1e-5, 1e-4),
+            "LR": insert_logarithmic_means(start=1e-5, end=1e-4, n_means=3, is_int=False),
             "BATCH_SIZE": [128],
             "EPOCHS": [5],
-            "WEIGHT_DECAY": reciprocal(1e-5, 1e-3)
+            "WEIGHT_DECAY": insert_logarithmic_means(start=1e-5, end=1e-3, n_means=3, is_int=False)
         }
     }
 }
@@ -168,4 +168,4 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 
 
 if __name__ == "__main__":
-    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="MAIN", hyperparameter_set="MAIN", subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
+    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="DEBUG", hyperparameter_set="DEBUG", subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
