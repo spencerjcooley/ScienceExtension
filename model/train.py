@@ -28,7 +28,7 @@ class FocalLoss(Module):
 
 loss_function = FocalLoss(alpha=0.9, gamma=2.0)
 
-def train_model(model, optimiser, device, epochs, patience, dataloader):
+def train_model(model, optimiser, device, epochs, dataloader):
     scaler = GradScaler(device=device)
 
     for epoch in range(epochs):
