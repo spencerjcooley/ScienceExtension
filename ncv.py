@@ -1,8 +1,10 @@
 from os import path, mkdir
+from math import log, exp
 from datetime import datetime
 from timeit import default_timer
 
 from torch import device, cuda
+from torch.utils.data import DataLoader
 from scipy.stats import reciprocal
 from sklearn.model_selection import KFold, ParameterSampler
 
@@ -10,11 +12,31 @@ from data import SubjectList, SegmentDataset
 from model import DynamicCNN
 from model import train_model, evaluate_model
 
+
+
+# === TOOLS ===
+def insert_logarithmic_means(start: float, end: float, n_means: int, is_int: bool = True):
+    d = (log(end) - log(start)) / (n_means + 1)
+    return [round(exp(log(start) + i * d)) for i in range(n_means + 2)] if is_int else [exp(log(start) + i * d) for i in range(n_means + 2)]
+
+def insert_arithmetic_means(start: int, end: int, n_means: int, is_int: bool = True):
+    d = (end - start)/(n_means + 1)
+    return [round(start + i * d) for i in range(n_means + 2)] if is_int else [start + i * d for i in range(n_means + 2)]
+
+
+
 # === SETTINGS ===
 START_TIME = datetime.now()
+
+OUTPUT_PATH = path.join(path.abspath("output"), f"data-{START_TIME.strftime('%Y%m%d-%H%M%S')}")
+SUBJECT_LIST = SubjectList(path.abspath("data"))
+
 DEVICE = device("cuda" if cuda.is_available() else "cpu")
 OUTER_K, INNER_K = 5, 4
 RANDOM_STATE = 10
+
+ALPHA = 0.05 # > 0
+TARGET_PERCENTILE = 95 # < 100
 
 NETWORKS = {
     "MAIN": [
@@ -50,12 +72,12 @@ NETWORKS = {
 
 HYPERPARAMETERS = {
     "MAIN": {
-        "ITERATIONS": 55,
+        "ITERATIONS": round(log(ALPHA)/log((TARGET_PERCENTILE/100))), # Iteration estimation via X~Bin(n,p)
         "GRID": {
-            "LR": reciprocal(1e-5, 1e-4),
-            "BATCH_SIZE": [16, 32, 64],
-            "EPOCHS": [20, 35, 60, 100],
-            "WEIGHT_DECAY": reciprocal(1e-5, 1e-3)
+            "LR": insert_logarithmic_means(start=1e-5, end=1e-4, n_means=3, is_int=False),
+            "BATCH_SIZE": insert_logarithmic_means(start=16, end=128, n_means=2),
+            "EPOCHS": insert_logarithmic_means(start=50, end=150, n_means=3),
+            "WEIGHT_DECAY": insert_logarithmic_means(start=1e-5, end=1e-3, n_means=3, is_int=False)
         }
     },
     "DEBUG": {
@@ -84,7 +106,12 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 ┃     OUTER FOLDS [{OUTER_K}]                                                     ┃
 ┃     INNER FOLDS [{INNER_K}]                                                     ┃
 ┃                                                                         ┃
-┃ MODEL CONFIGURATION [{network_type}]{' '*(50-len(network_type))}┃""")
+┃ MODEL CONFIGURATION [{network_type}]{' '*(50-len(network_type))}┃
+┃                                                                         ┃
+┃ RANDOM SEARCH COVERAGE                                                  ┃
+┃     CONFIDENCE: {int((1-ALPHA)*100):02d}%                                                     ┃
+┃     PERCENTILE: {TARGET_PERCENTILE:02d}%                                                     ┃
+┃     ITERATIONS: {hyperparameters['ITERATIONS']:02d}                                                      ┃""")
     
     for i, layer in enumerate(network):
         if i == 0: print(f"┃     {layer['type'].upper()}{' '*(68-len(layer['type']))}┃")
@@ -108,21 +135,27 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
         outer_train_set = [subject_list[i] for i in i_outer_train]
         outer_test_set = [subject_list[i] for i in i_outer_test]
 
+        # Tracking best hyperparameter settings
+        best_f1 = 0
+        best_config = None
+
         # Create hyperparameter configurations + inner fold split for inner cross validation
         inner_folds = KFold(n_splits=inner_k, shuffle=True, random_state=i_outer)
         configs = list(ParameterSampler(hyperparameters["GRID"], hyperparameters["ITERATIONS"], random_state=i_outer))
         for i_config, config in enumerate(configs):
-            
-            inner_train_set = [subject_list[i] for i in i_outer_train]
-            inner_val_set = [subject_list[i] for i in i_outer_test]
+            t_config = default_timer()
+
+            for i_inner, (i_inner_train, i_inner_test) in enumerate(inner_folds.split(outer_train_set)):
+                t_inner = default_timer()
+
+                # Create inner DataLoaders for training/testing
+                inner_train_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_train]), batch_size=config["BATCH_SIZE"], shuffle=True)
+                inner_test_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_test]), batch_size=config["BATCH_SIZE"])
+
+        # FOR JSON SAVING
+        # mkdir(output_path)
 
 
 
 if __name__ == "__main__":
-    destination = path.join(path.abspath("output"), f"data-{START_TIME.strftime('%Y%m%d-%H%M%S')}")
-    mkdir(destination)
-
-    OUTPUT_PATH = destination
-    SUBJECT_LIST = SubjectList(path.abspath("data"))
-
-    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="DEBUG", hyperparameter_set="DEBUG", subject_list=SUBJECT_LIST, output_path=destination, random_state=RANDOM_STATE)
+    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="MAIN", hyperparameter_set="MAIN", subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
