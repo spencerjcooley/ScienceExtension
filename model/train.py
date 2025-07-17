@@ -3,7 +3,6 @@ from torch.nn.utils import clip_grad_norm_
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.amp import autocast, GradScaler
 from torch import sigmoid, no_grad
-from copy import deepcopy
 
 
 class FocalLoss(Module):
