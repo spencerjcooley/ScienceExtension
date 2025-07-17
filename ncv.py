@@ -1,10 +1,11 @@
 from os import path, mkdir
-from math import log, exp
+from math import log, exp, prod
 from datetime import datetime
 from timeit import default_timer
 
 from torch import device, cuda
 from torch.utils.data import DataLoader
+from torch.optim import AdamW
 from scipy.stats import reciprocal
 from sklearn.model_selection import KFold, ParameterSampler
 
@@ -102,14 +103,15 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
     print(f"""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ NCV TEST {START_TIME.strftime('[%Y-%m-%d] [%H:%M:%S]')}                                        ┃
 ┃                                                                         ┃
-┃ TRAINING CONFIGURATION                                                  ┃
+┃ TRAINING SETTINGS.                                                      ┃
 ┃     OUTER FOLDS [{OUTER_K}]                                                     ┃
 ┃     INNER FOLDS [{INNER_K}]                                                     ┃
 ┃                                                                         ┃
-┃ RANDOM SEARCH COVERAGE                                                  ┃
+┃ RANDOM SEARCH SETTINGS                                                  ┃
 ┃     CONFIDENCE [{int((1-ALPHA)*100):02d}%]                                                    ┃
 ┃     PERCENTILE [{TARGET_PERCENTILE:02d}th]                                                   ┃
 ┃     ITERATIONS [{hyperparameters['ITERATIONS']:02d}]                                                     ┃
+┃     COVERAGE [{hyperparameters['ITERATIONS']*100//prod([len(options) for options in hyperparameters["GRID"].values()]):02d}%]                                                      ┃
 ┃                                                                         ┃
 ┃ MODEL CONFIGURATION [{network_type}]{' '*(50-len(network_type))}┃""")
     
@@ -149,8 +151,16 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
                 t_inner = default_timer()
 
                 # Create inner DataLoaders for training/testing
-                # inner_train_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_train]), batch_size=config["BATCH_SIZE"], shuffle=True)
-                # inner_test_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_test]), batch_size=config["BATCH_SIZE"])
+                inner_train_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_train]), batch_size=config["BATCH_SIZE"], shuffle=True)
+                inner_test_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_test]), batch_size=config["BATCH_SIZE"])
+
+                model = DynamicCNN(network)
+                optimiser = AdamW(params=model.parameters(), lr=config["LR"], weight_decay=config["WEIGHT_DECAY"])
+
+                train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], dataloader=inner_train_loader)
+                performance = evaluate_model(model=model, device=DEVICE, dataloader=inner_test_loader)
+
+
 
         # FOR JSON SAVING
         # mkdir(output_path)
