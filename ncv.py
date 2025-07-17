@@ -106,12 +106,12 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 ┃     OUTER FOLDS [{OUTER_K}]                                                     ┃
 ┃     INNER FOLDS [{INNER_K}]                                                     ┃
 ┃                                                                         ┃
-┃ MODEL CONFIGURATION [{network_type}]{' '*(50-len(network_type))}┃
-┃                                                                         ┃
 ┃ RANDOM SEARCH COVERAGE                                                  ┃
-┃     CONFIDENCE: {int((1-ALPHA)*100):02d}%                                                     ┃
-┃     PERCENTILE: {TARGET_PERCENTILE:02d}%                                                     ┃
-┃     ITERATIONS: {hyperparameters['ITERATIONS']:02d}                                                      ┃""")
+┃     CONFIDENCE [{int((1-ALPHA)*100):02d}%]                                                    ┃
+┃     PERCENTILE [{TARGET_PERCENTILE:02d}th]                                                   ┃
+┃     ITERATIONS [{hyperparameters['ITERATIONS']:02d}]                                                     ┃
+┃                                                                         ┃
+┃ MODEL CONFIGURATION [{network_type}]{' '*(50-len(network_type))}┃""")
     
     for i, layer in enumerate(network):
         if i == 0: print(f"┃     {layer['type'].upper()}{' '*(68-len(layer['type']))}┃")
@@ -149,8 +149,8 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
                 t_inner = default_timer()
 
                 # Create inner DataLoaders for training/testing
-                inner_train_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_train]), batch_size=config["BATCH_SIZE"], shuffle=True)
-                inner_test_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_test]), batch_size=config["BATCH_SIZE"])
+                # inner_train_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_train]), batch_size=config["BATCH_SIZE"], shuffle=True)
+                # inner_test_loader = DataLoader(dataset=SegmentDataset([subject_list[i] for i in i_inner_test]), batch_size=config["BATCH_SIZE"])
 
         # FOR JSON SAVING
         # mkdir(output_path)
