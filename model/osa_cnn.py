@@ -7,7 +7,7 @@ class DynamicCNN(Module):
         layers = []
         for layer in config:
             match layer["type"].lower():
-                case "conv":
+                case "conv1d":
                     layers.append(Conv1d(
                         in_channels=layer["in_channels"],
                         out_channels=layer["out_channels"],
@@ -15,9 +15,9 @@ class DynamicCNN(Module):
                         stride=layer.get("stride", 1),
                         padding=layer.get("padding", 0)
                     ))
-                case "batchnorm": layers.append(BatchNorm1d(num_features=layer["num_features"]))
-                case "maxpool": layers.append(MaxPool1d(kernel_size=layer["kernel_size"], stride=layer["stride"]))
-                case "adaptiveavgpool": layers.append(AdaptiveAvgPool1d(output_size=layer["output_size"]))
+                case "batchnorm1d": layers.append(BatchNorm1d(num_features=layer["num_features"]))
+                case "maxpool1d": layers.append(MaxPool1d(kernel_size=layer["kernel_size"], stride=layer["stride"]))
+                case "adaptiveavgpool1d": layers.append(AdaptiveAvgPool1d(output_size=layer["output_size"]))
                 case "flatten": layers.append(Flatten())
                 case "linear": layers.append(Linear(in_features=layer["in_features"], out_features=layer["out_features"]))
                 case "dropout": layers.append(Dropout(p=layer["p"]))
