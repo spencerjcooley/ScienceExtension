@@ -1,0 +1,104 @@
+from torch.nn import Module
+from torch.nn.utils import clip_grad_norm_
+from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.amp import autocast, GradScaler
+from torch import sigmoid, no_grad
+from numpy import mean
+
+
+class FocalLoss(Module):
+    def __init__(self, alpha, gamma, reduction = 'mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, logits, targets):
+        probabilities = sigmoid(logits)
+        bce_loss = binary_cross_entropy_with_logits(logits, targets, reduction='none')
+        p_t = probabilities * targets + (1 - probabilities) * (1 - targets)
+        alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        focal_loss = alpha_t * (1 - p_t) ** self.gamma * bce_loss
+
+        if self.reduction == 'mean': return focal_loss.mean()
+        elif self.reduction == 'sum': return focal_loss.sum()
+        else: return focal_loss
+
+
+
+loss_function = FocalLoss(alpha=0.85, gamma=2.0)
+
+def train_model(model, optimiser, device, epochs, dataloader):
+    losses = []
+    scaler = GradScaler(device=device)
+
+    for epoch in range(epochs):
+        model.train()
+        for x_batch, y_batch in dataloader:
+            x_batch = x_batch.to(device)
+            y_batch = y_batch.to(device)
+
+            optimiser.zero_grad()
+
+            with autocast(device_type=device):
+                logits = model(x_batch).squeeze(1)
+                loss = loss_function(logits, y_batch)
+
+            losses.append(loss.item())
+
+            scaler.scale(loss).backward()
+            clip_grad_norm_(model.parameters(), max_norm=1)
+            scaler.step(optimiser)
+            scaler.update()
+    
+    return losses
+
+
+
+def evaluate_model(model, device, dataloader, threshold=0.5):
+    total_loss, total_segments = 0.0, 0
+    TP, TN, FP, FN = 0, 0, 0, 0
+
+    model.eval()
+    with no_grad():
+        for x_batch, y_batch in dataloader:
+            x_batch = x_batch.to(device)
+            y_batch = y_batch.to(device)
+
+            with autocast(device_type=device):
+                logits = model(x_batch).squeeze(1)
+                loss = loss_function(logits, y_batch)
+
+            total_loss += loss.item() * x_batch.size(0)
+            total_segments += x_batch.size(0)
+
+            probabilities = sigmoid(logits)
+            predictions = (probabilities >= threshold).float()
+
+            TP += ((predictions == 1) & (y_batch == 1)).sum().item()
+            TN += ((predictions == 0) & (y_batch == 0)).sum().item()
+            FP += ((predictions == 1) & (y_batch == 0)).sum().item()
+            FN += ((predictions == 0) & (y_batch == 1)).sum().item()
+    
+    accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else 0
+    precision = TP / (TP + FP) if (TP + FP) > 0 else 0
+    recall = TP / (TP + FN) if (TP + FN) > 0 else 0
+    specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+
+    return {
+        "loss": total_loss / total_segments,
+        "confusion_matrix": {
+            "TP": TP,
+            "TN": TN,
+            "FP": FP,
+            "FN": FN
+        },
+        "metrics": {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "specificity": specificity,
+            "f1": f1
+        }
+    }
