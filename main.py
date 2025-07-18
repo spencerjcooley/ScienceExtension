@@ -84,7 +84,7 @@ HYPERPARAMETERS = {
         "GRID": {
             "LR": insert_logarithmic_means(start=1e-5, end=1e-4, n_means=3, is_int=False),
             "BATCH_SIZE": insert_logarithmic_means(start=16, end=128, n_means=2),
-            "EPOCHS": insert_logarithmic_means(start=50, end=150, n_means=3),
+            "EPOCHS": insert_logarithmic_means(start=50, end=100, n_means=2),
             "WEIGHT_DECAY": insert_logarithmic_means(start=1e-5, end=1e-3, n_means=3, is_int=False)
         }
     },
@@ -117,7 +117,7 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 ┃ RANDOM SEARCH SETTINGS                                                     ┃
 ┃     CONFIDENCE [{int((1-ALPHA)*100):02d}%]                                                       ┃
 ┃     PERCENTILE [{TARGET_PERCENTILE:02d}th]                                                      ┃
-┃     ITERATIONS [{hyperparameters['ITERATIONS']:02d}]                                                        ┃
+┃     CONFIGURATIONS [{hyperparameters['ITERATIONS']:02d}]                                                    ┃
 ┃     COVERAGE [{round(hyperparameters['ITERATIONS'] / prod([len(options) for options in hyperparameters["GRID"].values()]) * 100):02d}%]                                                         ┃
 ┃                                                                            ┃
 ┃ MODEL CONFIGURATION [{network_type}]{' '*(53-len(network_type))}┃""")
@@ -182,11 +182,11 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
                 inner_test_loader = DataLoader(dataset=SegmentDataset([outer_train_set[i] for i in i_inner_test]), batch_size=TEST_BATCH_SIZE)
 
                 # Initialising Model + Optimiser
-                model = DynamicCNN(network)
+                model = DynamicCNN(network).to(device=DEVICE)
                 optimiser = AdamW(params=model.parameters(), lr=config["LR"], weight_decay=config["WEIGHT_DECAY"])
 
                 # Training + Evaluating Model
-                losses = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], dataloader=inner_train_loader)
+                train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], dataloader=inner_train_loader)
                 performance = evaluate_model(model=model, device=DEVICE, dataloader=inner_test_loader)
                 metrics = performance["metrics"]
 
@@ -195,7 +195,6 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 
                 OUTPUT["configs"][i_config+1]["inner_folds"][i_inner+1] = {
                     "time": elapsed_time,
-                    "losses": losses,
                     "performance": performance
                 }
                 
@@ -228,10 +227,10 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
         outer_train_loader = DataLoader(dataset=SegmentDataset(outer_train_set), batch_size=best_config["BATCH_SIZE"], shuffle=True)
         outer_test_loader = DataLoader(dataset=SegmentDataset(outer_test_set), batch_size=TEST_BATCH_SIZE)
 
-        model = DynamicCNN(network)
+        model = DynamicCNN(network).to(device=DEVICE)
         optimiser = AdamW(params=model.parameters(), lr=best_config["LR"], weight_decay=best_config["WEIGHT_DECAY"])
         
-        losses = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], dataloader=outer_train_loader)
+        train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], dataloader=outer_train_loader)
         performance = evaluate_model(model=model, device=DEVICE, dataloader=outer_test_loader)
         metrics = performance["metrics"]
 
