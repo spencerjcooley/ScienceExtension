@@ -3,6 +3,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.amp import autocast, GradScaler
 from torch import sigmoid, no_grad
+from numpy import mean
 
 
 class FocalLoss(Module):
@@ -25,9 +26,10 @@ class FocalLoss(Module):
 
 
 
-loss_function = FocalLoss(alpha=0.9, gamma=2.0)
+loss_function = FocalLoss(alpha=0.85, gamma=2.0)
 
 def train_model(model, optimiser, device, epochs, dataloader):
+    losses = []
     scaler = GradScaler(device=device)
 
     for epoch in range(epochs):
@@ -42,10 +44,14 @@ def train_model(model, optimiser, device, epochs, dataloader):
                 logits = model(x_batch).squeeze(1)
                 loss = loss_function(logits, y_batch)
 
+            losses.append(loss.item())
+
             scaler.scale(loss).backward()
             clip_grad_norm_(model.parameters(), max_norm=1)
             scaler.step(optimiser)
             scaler.update()
+    
+    return losses
 
 
 
