@@ -1,16 +1,18 @@
+from re import sub
+from json import dumps
 from os import path, mkdir
-from math import log, exp, prod
+from numpy import mean, std
 from datetime import datetime
+from math import log, exp, prod
 from timeit import default_timer
 
-from torch import device, cuda
-from torch.utils.data import DataLoader
+from torch import cuda
 from torch.optim import AdamW
+from torch.utils.data import DataLoader
 from sklearn.model_selection import KFold, ParameterSampler
 
 from data import SubjectList, SegmentDataset
-from model import DynamicCNN
-from model import train_model, evaluate_model
+from model import DynamicCNN, train_model, evaluate_model
 
 
 
@@ -23,6 +25,8 @@ def insert_arithmetic_means(start: int, end: int, n_means: int, is_int: bool = T
     d = (end - start)/(n_means + 1)
     return [round(start + i * d) for i in range(n_means + 2)] if is_int else [start + i * d for i in range(n_means + 2)]
 
+replace_func = lambda match: " ".join(match.group().split())
+
 
 
 # === SETTINGS ===
@@ -31,7 +35,6 @@ START_TIME = datetime.now()
 OUTPUT_PATH = path.join(path.abspath("output"), f"data-{START_TIME.strftime('%Y%m%d-%H%M%S')}")
 SUBJECT_LIST = SubjectList(path.abspath("data"))
 
-# DEVICE = device("cuda" if cuda.is_available() else "cpu")
 DEVICE = "cuda" if cuda.is_available() else "cpu"
 OUTER_K, INNER_K = 5, 4
 RANDOM_STATE = 10
@@ -118,11 +121,9 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 ┃     COVERAGE [{round(hyperparameters['ITERATIONS'] / prod([len(options) for options in hyperparameters["GRID"].values()]) * 100):02d}%]                                                         ┃
 ┃                                                                            ┃
 ┃ MODEL CONFIGURATION [{network_type}]{' '*(53-len(network_type))}┃""")
-    
     for i, layer in enumerate(network):
         if i == 0: print(f"┃     {layer['type'].upper()}{' '*(71-len(layer['type']))}┃")
         else: print(f"┃     → {layer['type'].upper()}{' '*(69-len(layer['type']))}┃")
-
     print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
     
 
@@ -140,6 +141,13 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 
         t_outer = default_timer()
 
+        OUTPUT = {
+            "train_indices": i_outer_train.tolist(),
+            "test_indices": i_outer_test.tolist(),
+            "summary": {},
+            "configs": {}
+        }
+
         # Create list of custom SubjectData objects (in data/ecg_dataset.py)
         outer_train_set = [subject_list[i] for i in i_outer_train]
         outer_test_set = [subject_list[i] for i in i_outer_test]
@@ -155,8 +163,13 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
         configs = list(ParameterSampler(hyperparameters["GRID"], hyperparameters["ITERATIONS"], random_state=i_outer))
         for i_config, config in enumerate(configs):
             t_config = default_timer()
+            f1_scores = []
 
-            total_f1 = 0
+            OUTPUT["configs"][i_config+1] = {
+                "summary": {},
+                "hyperparameters": config,
+                "inner_folds": {}
+            }
 
             # === INNER FOLDS ===
 
@@ -173,20 +186,38 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
                 optimiser = AdamW(params=model.parameters(), lr=config["LR"], weight_decay=config["WEIGHT_DECAY"])
 
                 # Training + Evaluating Model
-                train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], dataloader=inner_train_loader)
+                losses = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], dataloader=inner_train_loader)
                 performance = evaluate_model(model=model, device=DEVICE, dataloader=inner_test_loader)
                 metrics = performance["metrics"]
 
-                total_f1 += metrics['f1']
+                f1_scores.append(metrics["f1"])
+                elapsed_time = default_timer()-t_inner
+
+                OUTPUT["configs"][i_config+1]["inner_folds"][i_inner+1] = {
+                    "time": elapsed_time,
+                    "losses": losses,
+                    "performance": performance
+                }
                 
-                print(f"""┃ {(i_config+1):02d}_{(i_inner+1):02d} │ {f"{(default_timer()-t_inner):.6f}"[:7]} │ {f"{performance['loss']:.7f}"[:8]} │ {f"{metrics['accuracy']*100:.6f}"[:7]} │ {f"{metrics['precision']:.5f}"[:6]} │ {f"{metrics['recall']:.6f}"[:7]} │ {f"{metrics['specificity']:.6f}"[:7]} │ {f"{metrics['f1']:.5f}"[:6]} ┃""")
+                print(f"""┃ {(i_config+1):02d}_{(i_inner+1):02d} │ {f"{elapsed_time:.6f}"[:7]} │ {f"{performance['loss']:.7f}"[:8]} │ {f"{metrics['accuracy']*100:.6f}"[:7]} │ {f"{metrics['precision']:.5f}"[:6]} │ {f"{metrics['recall']:.6f}"[:7]} │ {f"{metrics['specificity']:.6f}"[:7]} │ {f"{metrics['f1']:.5f}"[:6]} ┃""")
                 if (i_inner + 1 == inner_k) and (i_config + 1 != hyperparameters["ITERATIONS"]): print("┣━━━━━━━┿━━━━━━━━━┿━━━━━━━━━━┿━━━━━━━━━┿━━━━━━━━┿━━━━━━━━━┿━━━━━━━━━┿━━━━━━━━┫")
                 elif (i_config + 1 != hyperparameters["ITERATIONS"]) or (i_inner + 1 != inner_k): print("┠───────┼─────────┼──────────┼─────────┼────────┼─────────┼─────────┼────────┨")
 
-            if total_f1 > best_f1:
-                best_f1 = total_f1
+            mean_f1, std_f1 = mean(f1_scores), std(f1_scores)
+
+            if mean_f1 > best_f1:
+                best_f1 = mean_f1
                 best_config = config
                 i_best_config = i_config
+
+            OUTPUT["configs"][i_config+1]["summary"] = {
+                "time": default_timer() - t_config,
+                "f1": {
+                    "scores": f1_scores,
+                    "mean": mean_f1,
+                    "std_dev": std_f1
+                }
+            }
 
         print("┣━━━━━━━┷━━━━━━━━━┷━━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┷━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┫")
         print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛", end="\r")
@@ -200,44 +231,30 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
         model = DynamicCNN(network)
         optimiser = AdamW(params=model.parameters(), lr=best_config["LR"], weight_decay=best_config["WEIGHT_DECAY"])
         
-        train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], dataloader=outer_train_loader)
+        losses = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], dataloader=outer_train_loader)
         performance = evaluate_model(model=model, device=DEVICE, dataloader=outer_test_loader)
         metrics = performance["metrics"]
+
+        OUTPUT["summary"] = {
+            "model": network,
+            "time": default_timer() - t_outer,
+            "best_config": best_config,
+            "performance": performance
+        }
 
         print(f"""┃ OUTER [{(i_outer+1):02d}] TOTAL TIME: {f"{(default_timer()-t_outer):.6f}"[:7]}s                                            ┃
 ┠───────┬─────────┬──────────┬─────────┬────────┬─────────┬─────────┬────────┨
 ┃ {(i_outer+1):02d}_{(i_best_config+1):02d} │ {f"{(default_timer()-t_test):.6f}"[:7]} │ {f"{performance['loss']:.7f}"[:8]} │ {f"{metrics['accuracy']*100:.6f}"[:7]} │ {f"{metrics['precision']:.5f}"[:6]} │ {f"{metrics['recall']:.6f}"[:7]} │ {f"{metrics['specificity']:.6f}"[:7]} │ {f"{metrics['f1']:.5f}"[:6]} ┃""")
         print("┗━━━━━━━┷━━━━━━━━━┷━━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┷━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┛")
 
-        # FOR JSON SAVING
-        # mkdir(output_path)
 
 
-
-def standard(network_type: str, lr: float, batch_size: int, epochs: int, weight_decay: float, train_proportion: float, subject_list: SubjectList):
-    network = NETWORKS[network_type]
-
-    # === OVERVIEW HEADER ===
-    print(f"""
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ STANDARD TEST {START_TIME.strftime('[%Y-%m-%d] [%H:%M:%S]')}       ┃
-┃                                             ┃
-┃ MODEL CONFIGURATION [{network_type}]{' '*(22-len(network_type))}┃""")
-    
-    for i, layer in enumerate(network):
-        if i == 0: print(f"┃     {layer['type'].upper()}{' '*(40-len(layer['type']))}┃")
-        else: print(f"┃     → {layer['type'].upper()}{' '*(38-len(layer['type']))}┃")
-
-    print("""┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-┏━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┓
-┃ EPOCH ┃  ELAPSED  ┃    LOSS    ┃     F1     ┃
-┗━━━━━━━┻━━━━━━━━━━━┻━━━━━━━━━━━━┻━━━━━━━━━━━━┛""")
-
-    for epoch in range(epochs):
-        print(epoch)
+        # === SAVING MODEL ===
+        if not path.exists(output_path): mkdir(output_path)
+        with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file:
+            file.write(sub(r"(?<=\[)[^\[\]]+(?=\])", replace_func, dumps(OUTPUT, indent=4)))
 
 
 
 if __name__ == "__main__":
-    # standard(network_type="MAIN", lr=1e-5, batch_size=64, epochs=50, weight_decay=1e-5, train_proportion=0.8, subject_list=SUBJECT_LIST)
-    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="DEBUG", hyperparameter_set="DEBUG", subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
+    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="MAIN", hyperparameter_set="MAIN", subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
