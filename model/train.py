@@ -29,7 +29,6 @@ class FocalLoss(Module):
 loss_function = FocalLoss(alpha=0.85, gamma=2.0)
 
 def train_model(model, optimiser, device, epochs, dataloader):
-    losses = []
     scaler = GradScaler(device=device)
 
     for epoch in range(epochs):
@@ -44,14 +43,10 @@ def train_model(model, optimiser, device, epochs, dataloader):
                 logits = model(x_batch).squeeze(1)
                 loss = loss_function(logits, y_batch)
 
-            losses.append(loss.item())
-
             scaler.scale(loss).backward()
             clip_grad_norm_(model.parameters(), max_norm=1)
             scaler.step(optimiser)
             scaler.update()
-    
-    return losses
 
 
 
