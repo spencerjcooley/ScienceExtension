@@ -18,10 +18,10 @@ LAYER_REGISTRY = {
 }
 
 class DynamicCNN(Module):
-    def __init__(self, config):
+    def __init__(self, architecture):
         super().__init__()
         layers = []
-        for layer in config:
+        for layer in architecture:
             layer_type = layer["type"].lower()
             if layer_type not in LAYER_REGISTRY: raise ValueError(f"Unsupported layer type: {layer['type']}")
             layers.append(LAYER_REGISTRY[layer_type](layer))
