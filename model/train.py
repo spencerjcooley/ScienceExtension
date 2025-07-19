@@ -1,8 +1,7 @@
 from torch.nn import Module
 from torch.nn.utils import clip_grad_norm_
-from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.amp import autocast, GradScaler
-from torch import sigmoid, no_grad, exp
+from torch import sigmoid, no_grad
 
 
 class FocalLoss(Module):
@@ -13,9 +12,10 @@ class FocalLoss(Module):
         self.reduction = reduction
 
     def forward(self, logits, targets):
-        bce_loss = binary_cross_entropy_with_logits(logits, targets, reduction='none')
+        probs = sigmoid(logits)
+        p_t = targets * probs + (1 - targets) * (1 - probs)
         alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
-        focal_loss = alpha_t * (1 - exp(-bce_loss)) ** self.gamma * bce_loss
+        focal_loss = -alpha_t * (1 - p_t) ** self.gamma * p_t.log()
 
         if self.reduction == 'mean': return focal_loss.mean()
         elif self.reduction == 'sum': return focal_loss.sum()
@@ -67,11 +67,10 @@ def evaluate_model(model, device, batch_size, dataloader, threshold=0.5):
             total_segments += batch_size
 
             predictions = (sigmoid(logits) >= threshold).float()
-
-            TP += ((predictions == 1) & (y_batch == 1)).sum().item()
-            TN += ((predictions == 0) & (y_batch == 0)).sum().item()
-            FP += ((predictions == 1) & (y_batch == 0)).sum().item()
-            FN += ((predictions == 0) & (y_batch == 1)).sum().item()
+            TP += (predictions * y_batch).sum().item()
+            TN += ((1 - predictions) * (1 - y_batch)).sum().item()
+            FP += (predictions * (1 - y_batch)).sum().item()
+            FN += ((1 - predictions) * y_batch).sum().item()
 
     precision = TP / (TP + FP) if (TP + FP) > 0 else 0
     recall = TP / (TP + FN) if (TP + FN) > 0 else 0
