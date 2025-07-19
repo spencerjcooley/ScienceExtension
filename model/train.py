@@ -44,6 +44,8 @@ def train_model(model, optimiser, device, epochs, dataloader):
             clip_grad_norm_(model.parameters(), max_norm=1)
             scaler.step(optimiser)
             scaler.update()
+    
+    return model
 
 
 
