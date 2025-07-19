@@ -1,20 +1,19 @@
-from re import sub
-from sys import argv
-from numpy import mean, std
-from json import dumps, dump
+import numpy as np
+from os import path
+from math import log, exp
 from datetime import datetime
-from math import log, exp, prod
 from timeit import default_timer
-from os import path, mkdir, cpu_count
+from warnings import filterwarnings
+import matplotlib.pyplot as plt
 
+from torch import cuda
 from torch.optim import AdamW
-from torch import cuda, backends
 from torch.utils.data import DataLoader
-from sklearn.model_selection import KFold, ParameterSampler
+from sklearn.model_selection import StratifiedKFold, ParameterSampler
+filterwarnings("ignore", category=UserWarning, module='sklearn\.model_selection\..*')
 
 from data import SubjectList, SegmentDataset
 from model import DynamicCNN, train_model, evaluate_model
-
 
 
 # === TOOLS ===
@@ -25,6 +24,22 @@ def insert_logarithmic_means(start: float, end: float, n_means: int, is_int: boo
 def insert_arithmetic_means(start: int, end: int, n_means: int, is_int: bool = True):
     d = (end - start)/(n_means + 1)
     return [round(start + i * d) for i in range(n_means + 2)] if is_int else [start + i * d for i in range(n_means + 2)]
+
+def stratified_subject_split(subject_list: SubjectList, n_splits: int = 5, seed: int = 42):
+    subjects = subject_list
+    n_subjects = len(subjects)
+    prevalence = np.array([subject.y.mean().item() for subject in subjects])
+    bins = np.quantile(prevalence, [0.2, 0.4, 0.6, 0.8])
+    binned_labels = np.digitize(prevalence, bins=bins)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+
+    folds = []
+    for train_idx, val_idx in skf.split(np.arange(n_subjects), binned_labels):
+        train_subjects = [subjects[i] for i in train_idx]
+        val_subjects = [subjects[i] for i in val_idx]
+        folds.append((train_subjects, val_subjects))
+
+    return folds
 
 replace_func = lambda match: " ".join(match.group().split())
 
@@ -38,13 +53,12 @@ SUBJECT_LIST = SubjectList(path.abspath("data"))
 
 DEVICE = "cuda" if cuda.is_available() else "cpu"
 OUTER_K, INNER_K = 5, 4
-RANDOM_STATE = 10
-TEST_BATCH_SIZE = 256
+TEST_BATCH_SIZE = 512
 
 ALPHA = 0.05 # > 0
 TARGET_PERCENTILE = 90 # < 100
 
-NETWORKS = {
+MODELS = {
     "MAIN": [
         {"type": "conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
@@ -58,7 +72,7 @@ NETWORKS = {
         {"type": "linear", "in_features": 64, "out_features": 1}
     ],
     "BASIC": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 7, "stride": 1, "padding": 3},
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 16},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
@@ -79,218 +93,59 @@ NETWORKS = {
     ]
 }
 
-HYPERPARAMETERS_NCV = {
+NCV_CONFIGS = {
     "MAIN": {
         "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))), # Iteration estimation via X~Bin(n,p) | Ceiling Function
         "GRID": {
-            "LR": insert_logarithmic_means(start=1e-5, end=1e-4, n_means=3, is_int=False),
+            "LR": insert_logarithmic_means(start=1e-4, end=1e-3, n_means=3, is_int=False),
             "BATCH_SIZE": insert_logarithmic_means(start=32, end=128, n_means=1),
             "EPOCHS": insert_logarithmic_means(start=50, end=100, n_means=2),
-            "WEIGHT_DECAY": insert_logarithmic_means(start=1e-5, end=1e-3, n_means=3, is_int=False)
         }
     },
     "DEBUG": {
         "ITERATIONS": 3,
         "GRID": {
-            "LR": insert_logarithmic_means(start=1e-5, end=1e-4, n_means=3, is_int=False),
-            "BATCH_SIZE": [128],
-            "EPOCHS": [5],
-            "WEIGHT_DECAY": insert_logarithmic_means(start=1e-5, end=1e-3, n_means=3, is_int=False)
+            "LR": [1e-3],
+            "BATCH_SIZE": [64],
+            "EPOCHS": [500]
         }
     }
 }
 
-HYPERPARAMETERS_STANDARD = {
-    "MAIN": {
-        "LR": 1e-5,
-        "BATCH_SIZE": 32,
-        "EPOCHS": 150,
-        "WEIGHT_DECAY": 1e-5
-    }
-}
 
 
+def cv(k: int, network: dict, config: dict, test_batch_size: int, subject_list: list, random_seed: int = 42):
+    sfk = stratified_subject_split(subject_list, k, seed=random_seed)
+    for i, (train_list, test_list) in enumerate(sfk, 1):
+        t_fold = default_timer()
+        train_loader = DataLoader(SegmentDataset(train_list), config["BATCH_SIZE"], shuffle=True)
+        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=True)
 
-# === NESTED CROSS VALIDATION ===
-def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, subject_list: SubjectList, output_path: str, random_state: int = 1):
-    t_ncv = default_timer()
-    network, hyperparameters = NETWORKS[network_type], HYPERPARAMETERS_NCV[hyperparameter_set]
+        model = DynamicCNN(network).to(DEVICE)
+        optimiser = AdamW(model.parameters(), lr=config["LR"])
 
-    # === OVERVIEW HEADER ===
-    print(f"""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ NCV TEST {START_TIME.strftime('[%Y-%m-%d] [%H:%M:%S]')}                                           ┃
-┃                                                                            ┃
-┃ TRAINING SETTINGS.                                                         ┃
-┃     OUTER FOLDS [{outer_k}]                                                        ┃
-┃     INNER FOLDS [{inner_k}]                                                        ┃
-┃                                                                            ┃
-┃ RANDOM SEARCH SETTINGS                                                     ┃
-┃     CONFIDENCE [{int((1-ALPHA)*100):02d}%]                                                       ┃
-┃     PERCENTILE [{TARGET_PERCENTILE:02d}th]                                                      ┃
-┃     CONFIGURATIONS [{hyperparameters['ITERATIONS']:02d}]                                                    ┃
-┃     COVERAGE [{round(hyperparameters['ITERATIONS'] / prod([len(options) for options in hyperparameters["GRID"].values()]) * 100):02d}%]                                                         ┃
-┃                                                                            ┃
-┃ MODEL CONFIGURATION [{network_type}]{' '*(53-len(network_type))}┃""")
-    for i, layer in enumerate(network):
-        if i == 0: print(f"┃     {layer['type'].upper()}{' '*(71-len(layer['type']))}┃")
-        else: print(f"┃     → {layer['type'].upper()}{' '*(69-len(layer['type']))}┃")
-    print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
-    
+        losses = train_model(model, optimiser, DEVICE, config["EPOCHS"], train_loader)
+        performance = evaluate_model(model, DEVICE, test_batch_size, test_loader)
+        metrics = performance["metrics"]
+
+        plt.plot(range(len(losses)), losses)
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title(f"INNER FOLD {i}")
+        print(i, metrics)
+        plt.show()
 
 
-    # === OUTER FOLDS ===
-
-    model_performances = []
-
-    # Split data patient wise into K folds for outer CV loop
-    outer_folds = KFold(n_splits=outer_k, shuffle=True, random_state=random_state)
-    for i_outer, (i_outer_train, i_outer_test) in enumerate(outer_folds.split(subject_list.subjects), 1):
-        print(f"""┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ OUTER [{(i_outer):02d}]                                                                 ┃
-┣━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┫
-┃ MODEL ┃ ELAPSED ┃   LOSS   ┃   ACC   ┃  PREC  ┃   TPR   ┃   TNR   ┃   F1   ┃
-┣━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━┫""")
-
-        t_outer = default_timer()
-
-        OUTPUT = {
-            "train_indices": i_outer_train.tolist(),
-            "test_indices": i_outer_test.tolist(),
-            "summary": {},
-            "configs": {}
-        }
-
-        # Create list of custom SubjectData objects (in data/ecg_dataset.py)
-        outer_train_set = [subject_list[i] for i in i_outer_train]
-        outer_test_set = [subject_list[i] for i in i_outer_test]
-
-
-
-        # === HYPERPARAMETER RANDOM SEARCH ===
-
-        best_f1, i_best_config, best_config = 0, 0, None
-
-        # Create hyperparameter configurations + inner fold split for inner cross validation
+def ncv(outer_k: int, inner_k: int, network: dict, hyperparameters: dict, test_batch_size: int, subject_list: SubjectList, random_seed: int = 42):
+    outer_sfk = stratified_subject_split(subject_list.subjects, outer_k, random_seed)
+    for i_outer, (train_list, test_list) in enumerate(outer_sfk, 1):
         configs = list(ParameterSampler(hyperparameters["GRID"], hyperparameters["ITERATIONS"], random_state=i_outer))
-        for i_config, config in enumerate(configs):
-            t_config = default_timer()
-            f1_scores = []
-
-            OUTPUT["configs"][i_config] = {
-                "summary": {},
-                "hyperparameters": config,
-                "inner_folds": {}
-            }
-
-            # === INNER FOLDS ===
-
-            inner_folds = KFold(n_splits=inner_k, shuffle=True, random_state=(i_outer)*(i_config))
-            for i_inner, (i_inner_train, i_inner_test) in enumerate(inner_folds.split(outer_train_set)):
-                print("┗━━━━━━━┷━━━━━━━━━┷━━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┷━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┛", end="\r")
-                t_inner = default_timer()
-
-                # Create inner DataLoaders for training/testing
-                inner_train_loader = DataLoader(dataset=SegmentDataset([outer_train_set[i] for i in i_inner_train]), batch_size=config["BATCH_SIZE"], shuffle=True)
-                inner_test_loader = DataLoader(dataset=SegmentDataset([outer_train_set[i] for i in i_inner_test]), batch_size=TEST_BATCH_SIZE)
-
-                # Initialising Model + Optimiser
-                model = DynamicCNN(network).to(device=DEVICE)
-                optimiser = AdamW(params=model.parameters(), lr=config["LR"], weight_decay=config["WEIGHT_DECAY"])
-
-                # Training + Evaluating Model
-                model = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], dataloader=inner_train_loader)
-                performance = evaluate_model(model=model, device=DEVICE, batch_size=TEST_BATCH_SIZE, dataloader=inner_test_loader)
-                metrics = performance["metrics"]
-
-                f1_scores.append(metrics["f1"])
-                elapsed_time = default_timer()-t_inner
-
-                OUTPUT["configs"][i_config]["inner_folds"][i_inner] = {
-                    "time": elapsed_time,
-                    "performance": performance
-                }
-                
-                print(f"""┃ {(i_config):02d}_{(i_inner):02d} │ {f"{elapsed_time:.6f}"[:7]} │ {f"{performance['loss']:.7f}"[:8]} │ {f"{metrics['accuracy']*100:.6f}"[:7]} │ {f"{metrics['precision']:.5f}"[:6]} │ {f"{metrics['recall']:.6f}"[:7]} │ {f"{metrics['specificity']:.6f}"[:7]} │ {f"{metrics['f1']:.5f}"[:6]} ┃""")
-                if (i_inner == inner_k) and (i_config != hyperparameters["ITERATIONS"]): print("┣━━━━━━━┿━━━━━━━━━┿━━━━━━━━━━┿━━━━━━━━━┿━━━━━━━━┿━━━━━━━━━┿━━━━━━━━━┿━━━━━━━━┫")
-                elif (i_config != hyperparameters["ITERATIONS"]) or (i_inner != inner_k): print("┠───────┼─────────┼──────────┼─────────┼────────┼─────────┼─────────┼────────┨")
-
-            mean_f1, std_f1 = mean(f1_scores), std(f1_scores)
-
-            if mean_f1 > best_f1:
-                best_f1 = mean_f1
-                best_config = config
-                i_best_config = i_config
-
-            OUTPUT["configs"][i_config]["summary"] = {
-                "time": default_timer() - t_config,
-                "f1": {
-                    "scores": f1_scores,
-                    "mean": mean_f1,
-                    "std_dev": std_f1
-                }
-            }
-
-        print("┣━━━━━━━┷━━━━━━━━━┷━━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┷━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┫")
-        print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛", end="\r")
-
-        t_test = default_timer()
-
-        # Create outer DataLoaders for training/testing
-        outer_train_loader = DataLoader(dataset=SegmentDataset(outer_train_set), batch_size=best_config["BATCH_SIZE"], shuffle=True)
-        outer_test_loader = DataLoader(dataset=SegmentDataset(outer_test_set), batch_size=TEST_BATCH_SIZE)
-
-        model = DynamicCNN(network).to(device=DEVICE)
-        optimiser = AdamW(params=model.parameters(), lr=best_config["LR"], weight_decay=best_config["WEIGHT_DECAY"])
-
-        model = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], dataloader=outer_train_loader)
-        performance = evaluate_model(model=model, device=DEVICE, batch_size=TEST_BATCH_SIZE, dataloader=outer_test_loader)
-        metrics = performance["metrics"]
-
-        OUTPUT["summary"] = {
-            "model": network,
-            "time": default_timer() - t_outer,
-            "best_config": best_config,
-            "performance": performance
-        }
-
-        model_performances.append(performance)
-
-        print(f"""┃ OUTER [{(i_outer):02d}] TOTAL TIME: {f"{(default_timer()-t_outer):.6f}"[:7]}s                                            ┃
-┠───────┬─────────┬──────────┬─────────┬────────┬─────────┬─────────┬────────┨
-┃ {(i_outer):02d}_{(i_best_config):02d} │ {f"{(default_timer()-t_test):.6f}"[:7]} │ {f"{performance['loss']:.7f}"[:8]} │ {f"{metrics['accuracy']*100:.6f}"[:7]} │ {f"{metrics['precision']:.5f}"[:6]} │ {f"{metrics['recall']:.6f}"[:7]} │ {f"{metrics['specificity']:.6f}"[:7]} │ {f"{metrics['f1']:.5f}"[:6]} ┃""")
-        print("┗━━━━━━━┷━━━━━━━━━┷━━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┷━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┛")
-
-
-
-        # === SAVING MODEL ===
-        if not path.exists(output_path): mkdir(output_path)
-        with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file: file.write(sub(r"(?<=\[)[^\[\]]+(?=\])", replace_func, dumps(OUTPUT, indent=4)))
-    
-    acc_scores, prec_scores, recall_scores, spec_scores, f1_scores = [], [], [], [], []
-
-    for performance in model_performances:
-        metrics = performance["metrics"]
-        acc_scores.append(metrics["accuracy"])
-        prec_scores.append(metrics["precision"])
-        recall_scores.append(metrics["recall"])
-        spec_scores.append(metrics["specificity"])
-        f1_scores.append(metrics["f1"])
-
-    if not path.exists(output_path): mkdir(output_path)
-    with open(path.join(output_path, "summary.json"), "w", encoding="utf8") as file:
-        dump({
-            "time": default_timer() - t_ncv,
-            "metrics": {
-                "accuracy": mean(acc_scores),
-                "precision": mean(prec_scores),
-                "recall": mean(recall_scores),
-                "specificity": mean(spec_scores),
-                "f1": mean(f1_scores)
-            }
-        }, file, indent=4)
-
-
+        for i_config, config in enumerate(configs, 1):
+            cv(inner_k, network, config, test_batch_size, train_list, random_seed=(i_outer*i_config))
+        
+        
 
 if __name__ == "__main__":
-    backends.cudnn.benchmark = True
-    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type=argv[1].upper(), hyperparameter_set=argv[2].upper(), subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
+    evaluation_type = input("(NCV/STANDARD)? ").upper()
+    match evaluation_type:
+        case "NCV": ncv(OUTER_K, INNER_K, MODELS["MAIN"], NCV_CONFIGS["DEBUG"], TEST_BATCH_SIZE, SUBJECT_LIST, 2)
