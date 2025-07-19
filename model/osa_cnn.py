@@ -5,8 +5,8 @@ LAYER_REGISTRY = {
         in_channels=l["in_channels"],
         out_channels=l["out_channels"],
         kernel_size=l["kernel_size"],
-        stride=l.get("stride", 1),
-        padding=l.get("padding", 0)
+        stride=l["stride"],
+        padding=l["padding"]
     ),
     "batchnorm1d": lambda l: BatchNorm1d(num_features=l["num_features"]),
     "maxpool1d": lambda l: MaxPool1d(kernel_size=l["kernel_size"], stride=l["stride"]),
