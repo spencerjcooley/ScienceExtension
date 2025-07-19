@@ -5,6 +5,8 @@ from numpy import mean, std
 from datetime import datetime
 from math import log, exp, prod
 from timeit import default_timer
+from sys import argv
+import json
 
 from torch import cuda
 from torch.optim import AdamW
@@ -57,13 +59,13 @@ NETWORKS = {
         {"type": "linear", "in_features": 64, "out_features": 1}
     ],
     "BASIC": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 21, "stride": 1, "padding": 10},
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 7, "stride": 1, "padding": 3},
         {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 32},
-        {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 17, "stride": 1, "padding": 8},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 32},
+        {"type": "batchnorm1d", "num_features": 16},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 32},
         {"type": "adaptiveavgpool1d", "output_size": 1},
         {"type": "flatten"},
         {"type": "linear", "in_features": 32, "out_features": 1}
@@ -83,17 +85,17 @@ HYPERPARAMETERS = {
         "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))), # Iteration estimation via X~Bin(n,p) | Ceiling Function
         "GRID": {
             "LR": insert_logarithmic_means(start=1e-5, end=1e-4, n_means=3, is_int=False),
-            "BATCH_SIZE": insert_logarithmic_means(start=16, end=128, n_means=2),
+            "BATCH_SIZE": insert_logarithmic_means(start=32, end=128, n_means=1),
             "EPOCHS": insert_logarithmic_means(start=50, end=100, n_means=2),
             "WEIGHT_DECAY": insert_logarithmic_means(start=1e-5, end=1e-3, n_means=3, is_int=False)
         }
     },
     "DEBUG": {
-        "ITERATIONS": 2,
+        "ITERATIONS": 3,
         "GRID": {
             "LR": insert_logarithmic_means(start=1e-5, end=1e-4, n_means=3, is_int=False),
             "BATCH_SIZE": [128],
-            "EPOCHS": [1],
+            "EPOCHS": [3],
             "WEIGHT_DECAY": insert_logarithmic_means(start=1e-5, end=1e-3, n_means=3, is_int=False)
         }
     }
@@ -130,6 +132,8 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 
     # === OUTER FOLDS ===
 
+    model_performances = []
+
     # Split data patient wise into K folds for outer CV loop
     outer_folds = KFold(n_splits=outer_k, shuffle=True, random_state=random_state)
     for i_outer, (i_outer_train, i_outer_test) in enumerate(outer_folds.split(subject_list.subjects)):
@@ -159,7 +163,6 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
         best_f1, i_best_config, best_config = 0, 0, None
 
         # Create hyperparameter configurations + inner fold split for inner cross validation
-        inner_folds = KFold(n_splits=inner_k, shuffle=True, random_state=i_outer)
         configs = list(ParameterSampler(hyperparameters["GRID"], hyperparameters["ITERATIONS"], random_state=i_outer))
         for i_config, config in enumerate(configs):
             t_config = default_timer()
@@ -173,6 +176,7 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 
             # === INNER FOLDS ===
 
+            inner_folds = KFold(n_splits=inner_k, shuffle=True, random_state=(i_outer+1)*(i_config+1))
             for i_inner, (i_inner_train, i_inner_test) in enumerate(inner_folds.split(outer_train_set)):
                 print("┗━━━━━━━┷━━━━━━━━━┷━━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┷━━━━━━━━━┷━━━━━━━━━┷━━━━━━━━┛", end="\r")
                 t_inner = default_timer()
@@ -186,8 +190,8 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
                 optimiser = AdamW(params=model.parameters(), lr=config["LR"], weight_decay=config["WEIGHT_DECAY"])
 
                 # Training + Evaluating Model
-                train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], dataloader=inner_train_loader)
-                performance = evaluate_model(model=model, device=DEVICE, dataloader=inner_test_loader)
+                model = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=config["EPOCHS"], dataloader=inner_train_loader)
+                performance = evaluate_model(model=model, device=DEVICE, batch_size=TEST_BATCH_SIZE, dataloader=inner_test_loader)
                 metrics = performance["metrics"]
 
                 f1_scores.append(metrics["f1"])
@@ -229,9 +233,8 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 
         model = DynamicCNN(network).to(device=DEVICE)
         optimiser = AdamW(params=model.parameters(), lr=best_config["LR"], weight_decay=best_config["WEIGHT_DECAY"])
-        
-        train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], dataloader=outer_train_loader)
-        performance = evaluate_model(model=model, device=DEVICE, dataloader=outer_test_loader)
+        model = train_model(model=model, optimiser=optimiser, device=DEVICE, epochs=best_config["EPOCHS"], dataloader=outer_train_loader)
+        performance = evaluate_model(model=model, device=DEVICE, batch_size=TEST_BATCH_SIZE, dataloader=outer_test_loader)
         metrics = performance["metrics"]
 
         OUTPUT["summary"] = {
@@ -240,6 +243,8 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
             "best_config": best_config,
             "performance": performance
         }
+
+        model_performances.append(performance)
 
         print(f"""┃ OUTER [{(i_outer+1):02d}] TOTAL TIME: {f"{(default_timer()-t_outer):.6f}"[:7]}s                                            ┃
 ┠───────┬─────────┬──────────┬─────────┬────────┬─────────┬─────────┬────────┨
@@ -250,10 +255,32 @@ def ncv(inner_k: int, outer_k: int, network_type: str, hyperparameter_set: str, 
 
         # === SAVING MODEL ===
         if not path.exists(output_path): mkdir(output_path)
-        with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file:
-            file.write(sub(r"(?<=\[)[^\[\]]+(?=\])", replace_func, dumps(OUTPUT, indent=4)))
+        with open(path.join(output_path, f"{i_outer+1}.json"), "w", encoding="utf8") as file: file.write(sub(r"(?<=\[)[^\[\]]+(?=\])", replace_func, dumps(OUTPUT, indent=4)))
+    
+    acc_scores, prec_scores, recall_scores, spec_scores, f1_scores = [], [], [], [], []
+
+    for performance in model_performances:
+        metrics = performance["metrics"]
+        acc_scores.append(metrics["accuracy"])
+        prec_scores.append(metrics["precision"])
+        recall_scores.append(metrics["precision"])
+        spec_scores.append(metrics["specificity"])
+        f1_scores.append(metrics["f1"])
+
+    if not path.exists(output_path): mkdir(output_path)
+    with open(path.join(output_path, "summary.json"), "w", encoding="utf8") as file:
+        json.dump({
+            "time": default_timer() - t_ncv,
+            "metrics": {
+                "accuracy": mean(acc_scores),
+                "precision": mean(prec_scores),
+                "recall": mean(recall_scores),
+                "specificity": mean(spec_scores),
+                "f1": mean(f1_scores)
+            }
+        }, file, indent=4)
 
 
 
 if __name__ == "__main__":
-    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type="MAIN", hyperparameter_set="MAIN", subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
+    ncv(inner_k=INNER_K, outer_k=OUTER_K, network_type=argv[1].upper(), hyperparameter_set=argv[2].upper(), subject_list=SUBJECT_LIST, output_path=OUTPUT_PATH, random_state=RANDOM_STATE)
