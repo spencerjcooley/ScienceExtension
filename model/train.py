@@ -23,15 +23,15 @@ class FocalLoss(Module):
 
 
 
-loss_function = FocalLoss(alpha=0.85, gamma=2.0)
-
-def train_model(model, optimiser, device, epochs, dataloader):
+def train_model(model, optimiser, scheduler, loss_function, device, epochs, dataloader):
     losses = []
     scaler = GradScaler(device=device)
 
     model.train()
     for epoch in range(epochs):
-        epoch_loss = 0
+        epoch_loss = 0.0
+        n_samples = 0
+
         for x_batch, y_batch in dataloader:
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
@@ -42,20 +42,26 @@ def train_model(model, optimiser, device, epochs, dataloader):
                 logits = model(x_batch).squeeze(1)
                 loss = loss_function(logits, y_batch)
 
-            epoch_loss += loss.item()
+            batch_size = x_batch.size(0)
+            epoch_loss += loss.item() * batch_size
+            n_samples += batch_size
 
             scaler.scale(loss).backward()
+            scaler.unscale_(optimiser)
             clip_grad_norm_(model.parameters(), max_norm=1)
             scaler.step(optimiser)
             scaler.update()
 
-        losses.append((epoch_loss)/x_batch.size(0))
-    
+            scheduler.step()
+
+        avg_loss = epoch_loss / n_samples
+        losses.append(avg_loss)
+
     return losses
 
 
 
-def evaluate_model(model, device, batch_size, dataloader, threshold=0.5):
+def evaluate_model(model, device, loss_function, dataloader, threshold=0.5):
     total_loss, total_segments = 0.0, 0
     TP, TN, FP, FN = 0, 0, 0, 0
 
@@ -69,6 +75,7 @@ def evaluate_model(model, device, batch_size, dataloader, threshold=0.5):
                 logits = model(x_batch).squeeze(1)
                 loss = loss_function(logits, y_batch)
 
+            batch_size = x_batch.size(0)
             total_loss += loss.item() * batch_size
             total_segments += batch_size
 
