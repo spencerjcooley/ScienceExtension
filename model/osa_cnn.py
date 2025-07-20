@@ -1,4 +1,4 @@
-from torch.nn import Module, Sequential, Conv1d, BatchNorm1d, MaxPool1d, AdaptiveAvgPool1d, Flatten, Linear, Dropout, ReLU
+from torch.nn import Module, Sequential, Conv1d, BatchNorm1d, MaxPool1d, AdaptiveAvgPool1d, Flatten, Linear, Dropout, ReLU, GELU
 
 LAYER_REGISTRY = {
     "conv1d": lambda l: Conv1d(
@@ -14,7 +14,8 @@ LAYER_REGISTRY = {
     "flatten": lambda l: Flatten(),
     "linear": lambda l: Linear(in_features=l["in_features"], out_features=l["out_features"]),
     "dropout": lambda l: Dropout(p=l["p"]),
-    "relu": lambda l: ReLU()
+    "relu": lambda l: ReLU(),
+    "gelu": lambda l: GELU()
 }
 
 class DynamicCNN(Module):
