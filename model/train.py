@@ -5,14 +5,15 @@ from torch import sigmoid, no_grad
 
 
 class FocalLoss(Module):
-    def __init__(self, alpha, gamma, reduction = 'mean'):
+    def __init__(self, alpha, gamma, eps, reduction = 'mean'):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
+        self.eps = eps
         self.reduction = reduction
 
     def forward(self, logits, targets):
-        probs = sigmoid(logits)
+        probs = sigmoid(logits).clamp(min=self.eps, max=1-self.eps)
         p_t = targets * probs + (1 - targets) * (1 - probs)
         alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
         focal_loss = -alpha_t * (1 - p_t) ** self.gamma * p_t.log()
