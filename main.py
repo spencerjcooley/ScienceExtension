@@ -1,12 +1,11 @@
-import re
-import json
+from re import sub
+from json import dumps
 import numpy as np
-from os import path
+from os import path, mkdir
 from math import log, exp
 from datetime import datetime
 from timeit import default_timer
 from warnings import filterwarnings
-import matplotlib.pyplot as plt
 
 from torch import cuda
 from torch.optim import AdamW, lr_scheduler
@@ -48,9 +47,6 @@ replace_func = lambda match: " ".join(match.group().split())
 
 
 # === SETTINGS ===
-START_TIME = datetime.now()
-
-OUTPUT_PATH = path.join(path.abspath("output"), f"data-{START_TIME.strftime('%Y%m%d-%H%M%S')}")
 SUBJECT_LIST = SubjectList(path.abspath("data"))
 
 DEVICE = "cuda" if cuda.is_available() else "cpu"
@@ -61,83 +57,71 @@ ALPHA = 0.05 # > 0
 TARGET_PERCENTILE = 90 # < 100
 
 MODELS = {
-    "MAIN": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 32},
-        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 64},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
-        {"type": "linear", "in_features": 64, "out_features": 1}
-    ],
-    "STRIDED": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 8, "stride": 2, "padding": 2},
-        {"type": "gelu"},
-        {"type": "batchnorm1d", "num_features": 32},
-        {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "gelu"},
-        {"type": "batchnorm1d", "num_features": 64},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
-        {"type": "dropout", "p": 0.5},
-        {"type": "linear", "in_features": 64, "out_features": 1}
-    ],
-    "STRIDED_V2": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 8, "stride": 2, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 16},
-        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 32},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
-        {"type": "dropout", "p": 0.5},
-        {"type": "linear", "in_features": 32, "out_features": 1}
-    ],
-    "BASIC": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 16},
-        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 32},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
-        {"type": "linear", "in_features": 32, "out_features": 1}
-    ],
-    "DEBUG": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 3, "stride": 1, "padding": 1},
-        {"type": "relu"},
-        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
-        {"type": "linear", "in_features": 16, "out_features": 1}
-    ]
+    "1CONV": {
+        "16|5": [
+            {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+            {"type": "relu"},
+            {"type": "batchnorm1d", "num_features": 16},
+            {"type": "adaptiveavgpool1d", "output_size": 1},
+            {"type": "flatten"},
+            {"type": "linear", "in_features": 16, "out_features": 1}
+        ],
+        "32|5": [
+            {"type": "conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
+            {"type": "relu"},
+            {"type": "batchnorm1d", "num_features": 32},
+            {"type": "adaptiveavgpool1d", "output_size": 1},
+            {"type": "flatten"},
+            {"type": "linear", "in_features": 32, "out_features": 1}
+        ]
+    },
+    "2CONV": {
+        "8|8(S)_16|5": [
+            {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 8, "stride": 2, "padding": 2},
+            {"type": "relu"},
+            {"type": "batchnorm1d", "num_features": 8},
+            {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+            {"type": "relu"},
+            {"type": "batchnorm1d", "num_features": 16},
+            {"type": "adaptiveavgpool1d", "output_size": 1},
+            {"type": "flatten"},
+            {"type": "linear", "in_features": 16, "out_features": 1}
+        ],
+        "16|8(S)_32|5": [
+            {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 8, "stride": 2, "padding": 2},
+            {"type": "relu"},
+            {"type": "batchnorm1d", "num_features": 16},
+            {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
+            {"type": "relu"},
+            {"type": "batchnorm1d", "num_features": 32},
+            {"type": "adaptiveavgpool1d", "output_size": 1},
+            {"type": "flatten"},
+            {"type": "linear", "in_features": 32, "out_features": 1}
+        ]
+    }
 }
 
 NCV_CONFIGS = {
     "MAIN": {
         "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))), # Iteration estimation via X~Bin(n,p) | Ceiling Function
         "GRID": {
-            "LR": insert_logarithmic_means(start=5e-4, end=5e-3, n_means=3, is_int=False),
-            "BATCH_SIZE": insert_logarithmic_means(start=32, end=128, n_means=1),
+            "LR": insert_logarithmic_means(start=1e-4, end=1e-3, n_means=2, is_int=False),
+            "BATCH_SIZE": [64, 128],
             "EPOCHS": insert_logarithmic_means(start=50, end=100, n_means=2),
-            "ALPHA": insert_arithmetic_means(0.5, 0.95, n_means=2),
-            "GAMMA": insert_arithmetic_means(1, 3, n_means=1)
+            "ALPHA": [0.65, 0.75, 0.85],
+            "GAMMA": [1.5, 2],
+            "THRESHOLD": [0.5, 0.65, 0.8]
         }
     },
     "DEBUG": {
-        "ITERATIONS": 3,
+        "ITERATIONS": 1,
         "GRID": {
             "LR": [1e-3],
-            "BATCH_SIZE": [32],
-            "EPOCHS": [100],
-            "ALPHA": [0.85],
-            "GAMMA": [2.0]
+            "BATCH_SIZE": [64],
+            "EPOCHS": [25],
+            "ALPHA": [0.75],
+            "GAMMA": [2.0],
+            "THRESHOLD": [0.6]
         }
     }
 }
@@ -145,14 +129,14 @@ NCV_CONFIGS = {
 
 
 def cv(k: int, network: dict, config: dict, test_batch_size: int, subject_list: list, random_seed: int):
-    t = default_timer()
-    output = { "summary": {} }
+    t_config = default_timer()
+    output = { "summary": {}, "inner_folds": {} }
 
     f1_scores = []
     loss_scores = []
 
     sfk = stratified_subject_split(subject_list, k, seed=random_seed)
-    loss_function = FocalLoss(config["ALPHA"], config["GAMMA"])
+    loss_function = FocalLoss(config["ALPHA"], config["GAMMA"], eps=1e-6)
     for i, (train_list, test_list) in enumerate(sfk, 1):
         t_fold = default_timer()
 
@@ -164,10 +148,10 @@ def cv(k: int, network: dict, config: dict, test_batch_size: int, subject_list: 
         scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=config["LR"], steps_per_epoch=len(train_loader), epochs=config["EPOCHS"])
 
         losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, config["EPOCHS"], train_loader)
-        performance_train = evaluate_model(model, DEVICE, loss_function, train_loader)
-        performance_test = evaluate_model(model, DEVICE, loss_function, test_loader)
+        performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=config["THRESHOLD"])
+        performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=config["THRESHOLD"])
 
-        output[i] = {
+        output["inner_folds"][i] = {
             "time": default_timer() - t_fold,
             "losses": losses,
             "train_perf": performance_train,
@@ -178,21 +162,85 @@ def cv(k: int, network: dict, config: dict, test_batch_size: int, subject_list: 
         loss_scores.append(performance_test["loss"])
 
     output["summary"] = {
-        "time": default_timer() - t,
-        "mean_loss": np.mean(loss_scores),
-        "mean_f1": np.mean(f1_scores)
+        "time": default_timer() - t_config,
+        "mean_loss": float(np.mean(loss_scores)),
+        "mean_f1": float(np.mean(f1_scores))
     }
-
     return output
 
 
 
 def ncv(outer_k: int, inner_k: int, network: dict, hyperparameters: dict, test_batch_size: int, subject_list: SubjectList, random_seed: int = 42):
+
+    start_time = datetime.now()
+    output_path = path.join(path.abspath("output"), f"data-{start_time.strftime('%Y%m%d-%H%M%S')}")
+    config_iterations = hyperparameters["ITERATIONS"]
+
+    print(f"  NCV TRIAL {start_time.strftime('%d/%m/%Y %H:%M:%S')}")
+
+    mkdir(output_path)
     sfk = stratified_subject_split(subject_list.subjects, outer_k, random_seed)
     for i_outer, (train_list, test_list) in enumerate(sfk, 1):
-        configs = list(ParameterSampler(hyperparameters["GRID"], hyperparameters["ITERATIONS"], random_state=i_outer))
-        for i_config, config in enumerate(configs, 1):
+        print(f"    OUTER FOLD {i_outer:02d}")
+        t = default_timer()
+
+        i_best_config, best_config = 0, None
+        best_f1 = 0
+        output = {
+            "time": 0,
+            "model": {},
+            "configs": {}
+        }
+
+        configs = list(ParameterSampler(hyperparameters["GRID"], config_iterations, random_state=i_outer))
+        for i_config, config in enumerate(configs, 1):            
             config_data = cv(inner_k, network, config, test_batch_size, train_list, random_seed=(i_outer*i_config))
+            output["configs"][i_config] = config_data
+
+            if config_data["summary"]["mean_f1"] > best_f1:
+                best_f1 = config_data["summary"]["mean_f1"]
+                i_best_config = i_config
+                best_config = config
+                print(f"""      CONFIG {i_config:02d}/{config_iterations} B | TIME: {f"{config_data['summary']['time']:7f}"[:8]} | MEAN F1: {f"{config_data['summary']['mean_f1']:7f}"[:8]}""")
+            else: print(f"""      CONFIG {i_config:02d}/{config_iterations}   | TIME: {f"{config_data['summary']['time']:7f}"[:8]} | MEAN F1: {f"{config_data['summary']['mean_f1']:7f}"[:8]}""")
+
+        t_model = default_timer()
+
+        train_loader = DataLoader(SegmentDataset(train_list), best_config["BATCH_SIZE"], shuffle=True)
+        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=True)
+        loss_function = FocalLoss(best_config["ALPHA"], best_config["GAMMA"], eps=1e-6)
+
+        model = DynamicCNN(network).to(DEVICE)
+        optimiser = AdamW(model.parameters(), lr=best_config["LR"])
+        scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=best_config["LR"], steps_per_epoch=len(train_loader), epochs=best_config["EPOCHS"])
+
+        losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, best_config["EPOCHS"], train_loader)
+        performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=best_config["THRESHOLD"])
+        performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=best_config["THRESHOLD"])
+
+        t_model = default_timer() - t_model
+
+        output["time"] = default_timer() - t
+        output["model"] = {
+            "time": t_model,
+            "architecture": network,
+            "config": {
+                "id": i_best_config,
+                "hyperparameters": best_config
+            },
+            "losses": losses,
+            "train_perf": performance_train,
+            "test_perf": performance_test
+        }
+
+        print(f"""    OUTER MODEL {i_outer:02d}   | TIME: {f"{t_model:7f}"[:8]} | MEAN F1: {f"{performance_test['metrics']['f1']:7f}"[:8]}""")
+
+        with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file: file.write(sub(r"(?<=\[)[^\[\]]+(?=\])", replace_func, dumps(output, indent=4)))
+
 
 if __name__ == "__main__":
-    ncv(OUTER_K, INNER_K, MODELS["STRIDED_V2"], NCV_CONFIGS["DEBUG"], TEST_BATCH_SIZE, SUBJECT_LIST, 42)
+
+    for model_type_name, model_type in MODELS.items():
+        for model_name, model in model_type.items():
+            print(model_type_name, model_name)
+            ncv(OUTER_K, INNER_K, model, NCV_CONFIGS["MAIN"], TEST_BATCH_SIZE, SUBJECT_LIST, 42)
