@@ -57,7 +57,6 @@ def stratified_subject_split(subject_list: SubjectList, n_splits: int = 5, seed:
         train_subjects = [subjects[i] for i in train_idx]
         val_subjects = [subjects[i] for i in val_idx]
         folds.append((train_subjects, val_subjects))
-
     return folds
 
 replace_func = lambda match: " ".join(match.group().split())
@@ -65,6 +64,8 @@ replace_func = lambda match: " ".join(match.group().split())
 
 
 # === SETTINGS ===
+REGEX = r"(?<=\[)[^\[\]]+(?=\])"
+
 SUBJECT_LIST = SubjectList(path.abspath("data"))
 
 DEVICE = "cuda" if cuda.is_available() else "cpu"
@@ -148,6 +149,7 @@ NCV_CONFIGS = {
 
 
 
+# === TRAINING FUNCTIONS ===
 def cv(k: int, model_architecture: dict, config: dict, test_batch_size: int, subject_list: list, random_seed: int):
     t_config = default_timer()
     output = { "summary": {}, "inner_folds": {} }
@@ -191,18 +193,20 @@ def cv(k: int, model_architecture: dict, config: dict, test_batch_size: int, sub
 
 
 def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, hyperparameters: dict, test_batch_size: int, subject_list: SubjectList, email_server: smtplib.SMTP, random_seed: int = 42):
+    model_perfs = []
 
+    t_ncv = default_timer()
     start_time = datetime.now()
     output_path = path.join(path.abspath("output"), f"data-{start_time.strftime('%Y%m%d-%H%M%S')}")
     config_iterations = hyperparameters["ITERATIONS"]
 
-    print(f"  NCV TRIAL {start_time.strftime('%d/%m/%Y %H:%M:%S')}")
+    print(f"  NCV TRIAL {start_time.strftime('%d/%m/%Y %H:%M:%S')} | ITERATIONS {config_iterations}")
 
     mkdir(output_path)
     sfk = stratified_subject_split(subject_list.subjects, outer_k, random_seed)
     for i_outer, (train_list, test_list) in enumerate(sfk, 1):
         print(f"    OUTER FOLD {i_outer:02d}")
-        t = default_timer()
+        t_outer = default_timer()
 
         i_best_config, best_config = 0, None
         best_f1 = 0
@@ -237,10 +241,11 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
         losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, best_config["EPOCHS"], train_loader)
         performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=best_config["THRESHOLD"])
         performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=best_config["THRESHOLD"])
+        model_perfs.append(performance_test)
 
         t_model = default_timer() - t_model
 
-        output["time"] = default_timer() - t
+        output["time"] = default_timer() - t_outer
         output["model"] = {
             "time": t_model,
             "architecture": model_architecture,
@@ -253,20 +258,54 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
             "test_perf": performance_test
         }
 
-        print(f"""    OUTER MODEL {i_outer:02d}   | TIME: {f"{t_model:7f}"[:8]} | F1: {f"{performance_test['metrics']['f1']:7f}"[:8]}\n""")
+        print(f"""    OUTER MODEL {i_outer:02d}  | TIME: {f"{t_model:7f}"[:8]} | F1: {f"{performance_test['metrics']['f1']:7f}"[:8]}\n""")
 
         subject = f"""OUTER {i_outer:02d} | {model_name} | TIME: {f"{t_model:7f}"[:8]}"""
         body = f"""TIME: {t_model}
-ARCHITECTURE: {dumps(model_architecture, indent=4)}
+ARCHITECTURE: {sub(REGEX, replace_func, dumps(model_architecture, indent=4))}
+
 HYPERPARAMETERS: {dumps(best_config, indent=4)}
+
 TRAINING PERFORMANCE: {dumps(performance_train, indent=4)}
+
 TESTING PERFORMANCE: {dumps(performance_test, indent=4)}"""
         send_email(email_server, subject, body)
 
-        with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file: file.write(sub(r"(?<=\[)[^\[\]]+(?=\])", replace_func, dumps(output, indent=4)))
+        with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps(output, indent=4)))
+
+    mean_accuracy = np.mean([perf["metrics"]["accuracy"] for perf in model_perfs])
+    mean_precision = np.mean([perf["metrics"]["precision"] for perf in model_perfs])
+    mean_recall = np.mean([perf["metrics"]["recall"] for perf in model_perfs])
+    mean_specificity = np.mean([perf["metrics"]["specificity"] for perf in model_perfs])
+    mean_f1 = np.mean([perf["metrics"]["f1"] for perf in model_perfs])
+
+    t_ncv = default_timer() - t_ncv
+
+    subject = f"""NCV LOOP {model_name}"""
+    body = f"""TIME: {t_ncv}
+MEAN ACCURACY: {mean_accuracy}
+MEAN PRECISION: {mean_precision}
+MEAN RECALL: {mean_recall}
+MEAN SPECIFICITY: {mean_specificity}
+MEAN F1: {mean_f1}"""
+    send_email(email_server, subject, body)
+
+    print(f"\n{body}\n")
+
+    with open(path.join(output_path, f"summary.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps({
+        "time": t_ncv,
+        "mean_accuracy": mean_accuracy,
+        "mean_precision": mean_precision,
+        "mean_recall": mean_recall,
+        "mean_specificity": mean_specificity,
+        "mean_f1": mean_f1
+    }, indent=4)))
 
 
+
+# === MAIN ===
 if __name__ == "__main__":
+    if not path.exists("output"): mkdir("output")
     email_server = create_email_server()
     for model_name, model_architecture in MODELS.items():
         print(model_name)
