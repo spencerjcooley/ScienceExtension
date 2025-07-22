@@ -16,8 +16,26 @@ filterwarnings("ignore", category=UserWarning, module='sklearn\.model_selection\
 from data import SubjectList, SegmentDataset
 from model import DynamicCNN, train_model, evaluate_model, FocalLoss
 
+# Email notifications when away from computer
+import smtplib
+from email.mime.text import MIMEText
+from personal_info import sender_email, receiver_email, password
+
 
 # === TOOLS ===
+def create_email_server():
+    server = smtplib.SMTP_SSL("smtp.gmail.com", 465) # 465: SSL | 587: TLS/STARTTLS
+    #server.starttls()
+    server.login(sender_email, password)
+    return server
+
+def send_email(server: smtplib.SMTP, subject: str, body: str):
+    message = MIMEText(body, "plain")
+    message["Subject"] = subject
+    message["From"] = sender_email
+    message["To"] = receiver_email
+    server.sendmail(sender_email, receiver_email, message.as_string())
+
 def insert_logarithmic_means(start: float, end: float, n_means: int, is_int: bool = True):
     d = (log(end) - log(start)) / (n_means + 1)
     return [round(exp(log(start) + i * d)) for i in range(n_means + 2)] if is_int else [exp(log(start) + i * d) for i in range(n_means + 2)]
@@ -57,48 +75,50 @@ ALPHA = 0.05 # > 0
 TARGET_PERCENTILE = 90 # < 100
 
 MODELS = {
-    "1CONV": {
-        "16|5": [
-            {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-            {"type": "relu"},
-            {"type": "batchnorm1d", "num_features": 16},
-            {"type": "adaptiveavgpool1d", "output_size": 1},
-            {"type": "flatten"},
-            {"type": "linear", "in_features": 16, "out_features": 1}
-        ],
-        "32|5": [
-            {"type": "conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
-            {"type": "relu"},
-            {"type": "batchnorm1d", "num_features": 32},
-            {"type": "adaptiveavgpool1d", "output_size": 1},
-            {"type": "flatten"},
-            {"type": "linear", "in_features": 32, "out_features": 1}
-        ]
-    },
-    "2CONV": {
-        "8|8(S)_16|5": [
-            {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 8, "stride": 2, "padding": 2},
-            {"type": "relu"},
-            {"type": "batchnorm1d", "num_features": 8},
-            {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-            {"type": "relu"},
-            {"type": "batchnorm1d", "num_features": 16},
-            {"type": "adaptiveavgpool1d", "output_size": 1},
-            {"type": "flatten"},
-            {"type": "linear", "in_features": 16, "out_features": 1}
-        ],
-        "16|8(S)_32|5": [
-            {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 8, "stride": 2, "padding": 2},
-            {"type": "relu"},
-            {"type": "batchnorm1d", "num_features": 16},
-            {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
-            {"type": "relu"},
-            {"type": "batchnorm1d", "num_features": 32},
-            {"type": "adaptiveavgpool1d", "output_size": 1},
-            {"type": "flatten"},
-            {"type": "linear", "in_features": 32, "out_features": 1}
-        ]
-    }
+    "2CONV 8|8(S)_16|5": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 8, "stride": 2, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 8},
+        {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 16},
+        {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "flatten"},
+        {"type": "linear", "in_features": 16, "out_features": 1}
+    ],
+    "2CONV 16|8(S)_32|5": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 8, "stride": 2, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 16},
+        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 32},
+        {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "flatten"},
+        {"type": "linear", "in_features": 32, "out_features": 1}
+    ],
+    "2CONV 8|5_16|5": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 8},
+        {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 16},
+        {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "flatten"},
+        {"type": "linear", "in_features": 16, "out_features": 1}
+    ],
+    "2CONV 16|5_32|5": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 16},
+        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 32},
+        {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "flatten"},
+        {"type": "linear", "in_features": 32, "out_features": 1}
+    ]
 }
 
 NCV_CONFIGS = {
@@ -118,7 +138,7 @@ NCV_CONFIGS = {
         "GRID": {
             "LR": [1e-3],
             "BATCH_SIZE": [64],
-            "EPOCHS": [25],
+            "EPOCHS": [10],
             "ALPHA": [0.75],
             "GAMMA": [2.0],
             "THRESHOLD": [0.6]
@@ -128,7 +148,7 @@ NCV_CONFIGS = {
 
 
 
-def cv(k: int, network: dict, config: dict, test_batch_size: int, subject_list: list, random_seed: int):
+def cv(k: int, model_architecture: dict, config: dict, test_batch_size: int, subject_list: list, random_seed: int):
     t_config = default_timer()
     output = { "summary": {}, "inner_folds": {} }
 
@@ -143,7 +163,7 @@ def cv(k: int, network: dict, config: dict, test_batch_size: int, subject_list: 
         train_loader = DataLoader(SegmentDataset(train_list), config["BATCH_SIZE"], shuffle=True)
         test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=True)
 
-        model = DynamicCNN(network).to(DEVICE)
+        model = DynamicCNN(model_architecture).to(DEVICE)
         optimiser = AdamW(model.parameters(), lr=config["LR"])
         scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=config["LR"], steps_per_epoch=len(train_loader), epochs=config["EPOCHS"])
 
@@ -170,7 +190,7 @@ def cv(k: int, network: dict, config: dict, test_batch_size: int, subject_list: 
 
 
 
-def ncv(outer_k: int, inner_k: int, network: dict, hyperparameters: dict, test_batch_size: int, subject_list: SubjectList, random_seed: int = 42):
+def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, hyperparameters: dict, test_batch_size: int, subject_list: SubjectList, email_server: smtplib.SMTP, random_seed: int = 42):
 
     start_time = datetime.now()
     output_path = path.join(path.abspath("output"), f"data-{start_time.strftime('%Y%m%d-%H%M%S')}")
@@ -194,7 +214,7 @@ def ncv(outer_k: int, inner_k: int, network: dict, hyperparameters: dict, test_b
 
         configs = list(ParameterSampler(hyperparameters["GRID"], config_iterations, random_state=i_outer))
         for i_config, config in enumerate(configs, 1):            
-            config_data = cv(inner_k, network, config, test_batch_size, train_list, random_seed=(i_outer*i_config))
+            config_data = cv(inner_k, model_architecture, config, test_batch_size, train_list, random_seed=(i_outer*i_config))
             output["configs"][i_config] = config_data
 
             if config_data["summary"]["mean_f1"] > best_f1:
@@ -210,7 +230,7 @@ def ncv(outer_k: int, inner_k: int, network: dict, hyperparameters: dict, test_b
         test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=True)
         loss_function = FocalLoss(best_config["ALPHA"], best_config["GAMMA"], eps=1e-6)
 
-        model = DynamicCNN(network).to(DEVICE)
+        model = DynamicCNN(model_architecture).to(DEVICE)
         optimiser = AdamW(model.parameters(), lr=best_config["LR"])
         scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=best_config["LR"], steps_per_epoch=len(train_loader), epochs=best_config["EPOCHS"])
 
@@ -223,7 +243,7 @@ def ncv(outer_k: int, inner_k: int, network: dict, hyperparameters: dict, test_b
         output["time"] = default_timer() - t
         output["model"] = {
             "time": t_model,
-            "architecture": network,
+            "architecture": model_architecture,
             "config": {
                 "id": i_best_config,
                 "hyperparameters": best_config
@@ -233,14 +253,22 @@ def ncv(outer_k: int, inner_k: int, network: dict, hyperparameters: dict, test_b
             "test_perf": performance_test
         }
 
-        print(f"""    OUTER MODEL {i_outer:02d}   | TIME: {f"{t_model:7f}"[:8]} | MEAN F1: {f"{performance_test['metrics']['f1']:7f}"[:8]}""")
+        print(f"""    OUTER MODEL {i_outer:02d}   | TIME: {f"{t_model:7f}"[:8]} | F1: {f"{performance_test['metrics']['f1']:7f}"[:8]}\n""")
+
+        subject = f"""OUTER {i_outer:02d} | {model_name} | TIME: {f"{t_model:7f}"[:8]}"""
+        body = f"""TIME: {t_model}
+ARCHITECTURE: {dumps(model_architecture, indent=4)}
+HYPERPARAMETERS: {dumps(best_config, indent=4)}
+TRAINING PERFORMANCE: {dumps(performance_train, indent=4)}
+TESTING PERFORMANCE: {dumps(performance_test, indent=4)}"""
+        send_email(email_server, subject, body)
 
         with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file: file.write(sub(r"(?<=\[)[^\[\]]+(?=\])", replace_func, dumps(output, indent=4)))
 
 
 if __name__ == "__main__":
-
-    for model_type_name, model_type in MODELS.items():
-        for model_name, model in model_type.items():
-            print(model_type_name, model_name)
-            ncv(OUTER_K, INNER_K, model, NCV_CONFIGS["MAIN"], TEST_BATCH_SIZE, SUBJECT_LIST, 42)
+    email_server = create_email_server()
+    for model_name, model_architecture in MODELS.items():
+        print(model_name)
+        ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN"], test_batch_size=TEST_BATCH_SIZE, subject_list=SUBJECT_LIST, email_server=email_server)
+        print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
