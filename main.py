@@ -2,7 +2,7 @@ from re import sub
 from json import dumps
 import numpy as np
 from os import path, mkdir
-from math import log, exp
+from math import log, exp, prod
 from datetime import datetime
 from timeit import default_timer
 from warnings import filterwarnings
@@ -76,17 +76,17 @@ ALPHA = 0.05 # > 0
 TARGET_PERCENTILE = 90 # < 100
 
 MODELS = {
-    "2CONV 8|8(S)_16|5": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 8, "stride": 2, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 8},
-        {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 16},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
-        {"type": "linear", "in_features": 16, "out_features": 1}
-    ],
+    # "2CONV 8|8(S)_16|5": [
+    #     {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 8, "stride": 2, "padding": 2},
+    #     {"type": "relu"},
+    #     {"type": "batchnorm1d", "num_features": 8},
+    #     {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+    #     {"type": "relu"},
+    #     {"type": "batchnorm1d", "num_features": 16},
+    #     {"type": "adaptiveavgpool1d", "output_size": 1},
+    #     {"type": "flatten"},
+    #     {"type": "linear", "in_features": 16, "out_features": 1}
+    # ],
     "2CONV 16|8(S)_32|5": [
         {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 8, "stride": 2, "padding": 2},
         {"type": "relu"},
@@ -98,17 +98,17 @@ MODELS = {
         {"type": "flatten"},
         {"type": "linear", "in_features": 32, "out_features": 1}
     ],
-    "2CONV 8|5_16|5": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 8},
-        {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 16},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
-        {"type": "linear", "in_features": 16, "out_features": 1}
-    ],
+    # "2CONV 8|5_16|5": [
+    #     {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 2},
+    #     {"type": "relu"},
+    #     {"type": "batchnorm1d", "num_features": 8},
+    #     {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+    #     {"type": "relu"},
+    #     {"type": "batchnorm1d", "num_features": 16},
+    #     {"type": "adaptiveavgpool1d", "output_size": 1},
+    #     {"type": "flatten"},
+    #     {"type": "linear", "in_features": 16, "out_features": 1}
+    # ]
     "2CONV 16|5_32|5": [
         {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
@@ -200,7 +200,7 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
     output_path = path.join(path.abspath("output"), f"data-{start_time.strftime('%Y%m%d-%H%M%S')}")
     config_iterations = hyperparameters["ITERATIONS"]
 
-    print(f"  NCV TRIAL {start_time.strftime('%d/%m/%Y %H:%M:%S')} | ITERATIONS {config_iterations}")
+    print(f"  NCV TRIAL {start_time.strftime('%d/%m/%Y %H:%M:%S')} | ITERATIONS {config_iterations} | COVERAGE {100*config_iterations/prod([len(x) for x in hyperparameters['GRID'].values()]):3f}%")
 
     mkdir(output_path)
     sfk = stratified_subject_split(subject_list.subjects, outer_k, random_seed)
