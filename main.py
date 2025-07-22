@@ -7,7 +7,8 @@ from datetime import datetime
 from timeit import default_timer
 from warnings import filterwarnings
 
-from torch import cuda
+from torch import cuda, backends
+from torch import set_float32_matmul_precision
 from torch.optim import AdamW, lr_scheduler
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedKFold, ParameterSampler
@@ -163,7 +164,7 @@ def cv(k: int, model_architecture: dict, config: dict, test_batch_size: int, sub
         t_fold = default_timer()
 
         train_loader = DataLoader(SegmentDataset(train_list), config["BATCH_SIZE"], shuffle=True)
-        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=True)
+        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=False)
 
         model = DynamicCNN(model_architecture).to(DEVICE)
         optimiser = AdamW(model.parameters(), lr=config["LR"])
@@ -216,22 +217,22 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
             "configs": {}
         }
 
-        configs = list(ParameterSampler(hyperparameters["GRID"], config_iterations, random_state=i_outer))
+        configs = list(ParameterSampler(hyperparameters["GRID"], config_iterations, random_state=np.random.RandomState(random_seed+i_outer)))
         for i_config, config in enumerate(configs, 1):            
-            config_data = cv(inner_k, model_architecture, config, test_batch_size, train_list, random_seed=(i_outer*i_config))
+            config_data = cv(inner_k, model_architecture, config, test_batch_size, train_list, random_seed=random_seed)
             output["configs"][i_config] = config_data
 
             if config_data["summary"]["mean_f1"] > best_f1:
                 best_f1 = config_data["summary"]["mean_f1"]
                 i_best_config = i_config
                 best_config = config
-                print(f"""      CONFIG {i_config:02d}/{config_iterations} B | TIME: {f"{config_data['summary']['time']:7f}"[:8]} | MEAN F1: {f"{config_data['summary']['mean_f1']:7f}"[:8]}""")
-            else: print(f"""      CONFIG {i_config:02d}/{config_iterations}   | TIME: {f"{config_data['summary']['time']:7f}"[:8]} | MEAN F1: {f"{config_data['summary']['mean_f1']:7f}"[:8]}""")
+                print(f"""      CONFIG {i_config:02d}/{config_iterations} B | TIME: {f"{config_data['summary']['time']:.7f}"[:8]} | MEAN F1: {f"{config_data['summary']['mean_f1']:.7f}"[:8]}""")
+            else: print(f"""      CONFIG {i_config:02d}/{config_iterations}   | TIME: {f"{config_data['summary']['time']:.7f}"[:8]} | MEAN F1: {f"{config_data['summary']['mean_f1']:.7f}"[:8]}""")
 
         t_model = default_timer()
 
         train_loader = DataLoader(SegmentDataset(train_list), best_config["BATCH_SIZE"], shuffle=True)
-        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=True)
+        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=False)
         loss_function = FocalLoss(best_config["ALPHA"], best_config["GAMMA"], eps=1e-6)
 
         model = DynamicCNN(model_architecture).to(DEVICE)
@@ -258,9 +259,9 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
             "test_perf": performance_test
         }
 
-        print(f"""    OUTER MODEL {i_outer:02d}  | TIME: {f"{t_model:7f}"[:8]} | F1: {f"{performance_test['metrics']['f1']:7f}"[:8]}\n""")
+        print(f"""    OUTER MODEL {i_outer:02d}  | TIME: {f"{t_model:.7f}"[:8]} | F1: {f"{performance_test['metrics']['f1']:.7f}"[:8]}\n""")
 
-        subject = f"""OUTER {i_outer:02d} | {model_name} | TIME: {f"{t_model:7f}"[:8]}"""
+        subject = f"""OUTER {i_outer:02d} | {model_name} | TIME: {f"{t_model:.7f}"[:8]}"""
         body = f"""TIME: {t_model}
 ARCHITECTURE: {sub(REGEX, replace_func, dumps(model_architecture, indent=4))}
 
@@ -305,8 +306,14 @@ MEAN F1: {mean_f1}"""
 
 # === MAIN ===
 if __name__ == "__main__":
+
     if not path.exists("output"): mkdir("output")
     email_server = create_email_server()
+
+    backends.cudnn.benchmark = True
+    backends.cudnn.deterministic = False
+    set_float32_matmul_precision('high')
+
     for model_name, model_architecture in MODELS.items():
         print(model_name)
         ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN"], test_batch_size=TEST_BATCH_SIZE, subject_list=SUBJECT_LIST, email_server=email_server)
