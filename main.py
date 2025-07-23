@@ -30,7 +30,7 @@ def create_email_server():
     server.login(sender_email, password)
     return server
 
-def send_email(server: smtplib.SMTP, subject: str, body: str):
+def send_email(server: smtplib.SMTP_SSL, subject: str, body: str):
     message = MIMEText(body, "plain")
     message["Subject"] = subject
     message["From"] = sender_email
@@ -270,7 +270,8 @@ HYPERPARAMETERS: {dumps(best_config, indent=4)}
 TRAINING PERFORMANCE: {dumps(performance_train, indent=4)}
 
 TESTING PERFORMANCE: {dumps(performance_test, indent=4)}"""
-        send_email(email_server, subject, body)
+        try: send_email(email_server, subject, body)
+        except Exception as e: print("ERROR", e)
 
         with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps(output, indent=4)))
 
@@ -289,7 +290,8 @@ MEAN PRECISION: {mean_precision}
 MEAN RECALL: {mean_recall}
 MEAN SPECIFICITY: {mean_specificity}
 MEAN F1: {mean_f1}"""
-    send_email(email_server, subject, body)
+    try: send_email(email_server, subject, body)
+    except Exception as e: print("ERROR", e)
 
     print(f"\n{body}\n")
 
@@ -318,3 +320,5 @@ if __name__ == "__main__":
         print(model_name)
         ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN"], test_batch_size=TEST_BATCH_SIZE, subject_list=SUBJECT_LIST, email_server=email_server)
         print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    
+    email_server.quit()
