@@ -25,12 +25,12 @@ from personal_info import sender_email, receiver_email, password
 
 # === TOOLS ===
 def create_email_server():
-    server = smtplib.SMTP_SSL("smtp.gmail.com", 465) # 465: SSL | 587: TLS/STARTTLS
-    #server.starttls()
+    server = smtplib.SMTP("smtp.gmail.com", 587) # 465: SSL | 587: TLS/STARTTLS
+    server.starttls()
     server.login(sender_email, password)
     return server
 
-def send_email(server: smtplib.SMTP_SSL, subject: str, body: str):
+def send_email(server: smtplib.SMTP, subject: str, body: str):
     message = MIMEText(body, "plain")
     message["Subject"] = subject
     message["From"] = sender_email
@@ -88,14 +88,14 @@ MODELS = {
     #     {"type": "flatten"},
     #     {"type": "linear", "in_features": 16, "out_features": 1}
     # ],
-    "2CONV 16|8(S)_32|5": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 8, "stride": 2, "padding": 2},
+    "2CONV 16|6(S)_32|5": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 6, "stride": 2, "padding": 2},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 16},
         {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 32},
         {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "batchnorm1d", "num_features": 1},
         {"type": "flatten"},
         {"type": "linear", "in_features": 32, "out_features": 1}
     ],
@@ -114,6 +114,7 @@ MODELS = {
         {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 16},
+        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
         {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 32},
@@ -127,12 +128,12 @@ NCV_CONFIGS = {
     "MAIN": {
         "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))), # Iteration estimation via X~Bin(n,p) | Ceiling Function
         "GRID": {
-            "LR": insert_logarithmic_means(start=1e-4, end=1e-3, n_means=2, is_int=False),
+            "LR": insert_logarithmic_means(start=1e-4, end=5e-4, n_means=2, is_int=False),
             "BATCH_SIZE": [64, 128],
             "EPOCHS": insert_logarithmic_means(start=50, end=100, n_means=2),
-            "ALPHA": [0.65, 0.75, 0.85],
-            "GAMMA": [1.5, 2],
-            "THRESHOLD": [0.5, 0.65, 0.8]
+            "ALPHA": [0.7, 0.75, 0.8],
+            "GAMMA": [1.75, 2, 2.25],
+            "THRESHOLD": [0.5, 0.6, 0.7]
         }
     },
     "DEBUG": {
@@ -212,7 +213,7 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
         i_best_config, best_config = 0, None
         best_f1 = 0
         output = {
-            "time": 0,
+            "total_time": 0,
             "model": {},
             "configs": {}
         }
@@ -246,7 +247,7 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
 
         t_model = default_timer() - t_model
 
-        output["time"] = default_timer() - t_outer
+        output["total_time"] = default_timer() - t_outer
         output["model"] = {
             "time": t_model,
             "architecture": model_architecture,
@@ -315,6 +316,9 @@ if __name__ == "__main__":
     backends.cudnn.benchmark = True
     backends.cudnn.deterministic = False
     set_float32_matmul_precision('high')
+
+    try: send_email(email_server, "NCV LOOP", "Model training has begun")
+    except Exception as e: print("ERROR", e)
 
     for model_name, model_architecture in MODELS.items():
         print(model_name)
