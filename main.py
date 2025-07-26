@@ -24,18 +24,15 @@ from personal_info import sender_email, receiver_email, password
 
 
 # === TOOLS ===
-def create_email_server():
-    server = smtplib.SMTP("smtp.gmail.com", 587) # 465: SSL | 587: TLS/STARTTLS
-    server.starttls()
+def send_email(subject: str, body: str):
+    server = smtplib.SMTP_SSL("smtp.gmail.com", 465) # 465: SSL | 587: TLS/STARTTLS
     server.login(sender_email, password)
-    return server
-
-def send_email(server: smtplib.SMTP, subject: str, body: str):
     message = MIMEText(body, "plain")
     message["Subject"] = subject
     message["From"] = sender_email
     message["To"] = receiver_email
     server.sendmail(sender_email, receiver_email, message.as_string())
+    server.quit()
 
 def insert_logarithmic_means(start: float, end: float, n_means: int, is_int: bool = True):
     d = (log(end) - log(start)) / (n_means + 1)
@@ -77,45 +74,23 @@ ALPHA = 0.05 # > 0
 TARGET_PERCENTILE = 90 # < 100
 
 MODELS = {
-    # "2CONV 8|8(S)_16|5": [
-    #     {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 8, "stride": 2, "padding": 2},
-    #     {"type": "relu"},
-    #     {"type": "batchnorm1d", "num_features": 8},
-    #     {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-    #     {"type": "relu"},
-    #     {"type": "batchnorm1d", "num_features": 16},
-    #     {"type": "adaptiveavgpool1d", "output_size": 1},
-    #     {"type": "flatten"},
-    #     {"type": "linear", "in_features": 16, "out_features": 1}
-    # ],
-    "2CONV 16|6(S)_32|5": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 6, "stride": 2, "padding": 2},
+    "2CONV 8|5_16|5": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 8},
+        {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 16},
-        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 32},
         {"type": "adaptiveavgpool1d", "output_size": 1},
         {"type": "flatten"},
-        {"type": "linear", "in_features": 32, "out_features": 1}
+        {"type": "linear", "in_features": 16, "out_features": 1}
     ],
-    # "2CONV 8|5_16|5": [
-    #     {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 2},
-    #     {"type": "relu"},
-    #     {"type": "batchnorm1d", "num_features": 8},
-    #     {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-    #     {"type": "relu"},
-    #     {"type": "batchnorm1d", "num_features": 16},
-    #     {"type": "adaptiveavgpool1d", "output_size": 1},
-    #     {"type": "flatten"},
-    #     {"type": "linear", "in_features": 16, "out_features": 1}
-    # ]
-    "2CONV 16|5_32|5": [
+    "2CONV 16|5_32|3": [
         {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 16},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 32},
         {"type": "adaptiveavgpool1d", "output_size": 1},
@@ -128,12 +103,12 @@ NCV_CONFIGS = {
     "MAIN": {
         "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))), # Iteration estimation via X~Bin(n,p) | Ceiling Function
         "GRID": {
-            "LR": insert_logarithmic_means(start=1e-4, end=5e-4, n_means=2, is_int=False),
+            "LR": insert_logarithmic_means(start=1e-4, end=3e-4, n_means=2, is_int=False),
             "BATCH_SIZE": [64, 128],
-            "EPOCHS": insert_logarithmic_means(start=50, end=100, n_means=2),
+            "EPOCHS": insert_logarithmic_means(start=50, end=80, n_means=1),
             "ALPHA": [0.7, 0.75, 0.8],
             "GAMMA": [1.75, 2, 2.25],
-            "THRESHOLD": [0.5, 0.6, 0.7]
+            "THRESHOLD": [0.4, 0.5, 0.6]
         }
     },
     "DEBUG": {
@@ -194,8 +169,8 @@ def cv(k: int, model_architecture: dict, config: dict, test_batch_size: int, sub
 
 
 
-def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, hyperparameters: dict, test_batch_size: int, subject_list: SubjectList, email_server: smtplib.SMTP, random_seed: int = 42):
-    model_perfs = []
+def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, hyperparameters: dict, test_batch_size: int, subject_list: SubjectList, random_seed: int = 42):
+    train_perfs, test_perfs = [], []
 
     t_ncv = default_timer()
     start_time = datetime.now()
@@ -243,7 +218,8 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
         losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, best_config["EPOCHS"], train_loader)
         performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=best_config["THRESHOLD"])
         performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=best_config["THRESHOLD"])
-        model_perfs.append(performance_test)
+        train_perfs.append(performance_train)
+        test_perfs.append(performance_test)
 
         t_model = default_timer() - t_model
 
@@ -271,38 +247,60 @@ HYPERPARAMETERS: {dumps(best_config, indent=4)}
 TRAINING PERFORMANCE: {dumps(performance_train, indent=4)}
 
 TESTING PERFORMANCE: {dumps(performance_test, indent=4)}"""
-        try: send_email(email_server, subject, body)
+        try: send_email(subject, body)
         except Exception as e: print("ERROR", e)
 
         with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps(output, indent=4)))
 
-    mean_accuracy = np.mean([perf["metrics"]["accuracy"] for perf in model_perfs])
-    mean_precision = np.mean([perf["metrics"]["precision"] for perf in model_perfs])
-    mean_recall = np.mean([perf["metrics"]["recall"] for perf in model_perfs])
-    mean_specificity = np.mean([perf["metrics"]["specificity"] for perf in model_perfs])
-    mean_f1 = np.mean([perf["metrics"]["f1"] for perf in model_perfs])
+    test_accuracy = np.mean([perf["metrics"]["accuracy"] for perf in test_perfs])
+    test_precision = np.mean([perf["metrics"]["precision"] for perf in test_perfs])
+    test_recall = np.mean([perf["metrics"]["recall"] for perf in test_perfs])
+    test_specificity = np.mean([perf["metrics"]["specificity"] for perf in test_perfs])
+    test_f1 = np.mean([perf["metrics"]["f1"] for perf in test_perfs])
+
+    train_accuracy = np.mean([perf["metrics"]["accuracy"] for perf in train_perfs])
+    train_precision = np.mean([perf["metrics"]["precision"] for perf in train_perfs])
+    train_recall = np.mean([perf["metrics"]["recall"] for perf in train_perfs])
+    train_specificity = np.mean([perf["metrics"]["specificity"] for perf in train_perfs])
+    train_f1 = np.mean([perf["metrics"]["f1"] for perf in train_perfs])
 
     t_ncv = default_timer() - t_ncv
 
-    subject = f"""NCV LOOP {model_name}"""
+    subject = f"""NCV LOOP {model_name} AVERAGE RESULTS"""
     body = f"""TIME: {t_ncv}
-MEAN ACCURACY: {mean_accuracy}
-MEAN PRECISION: {mean_precision}
-MEAN RECALL: {mean_recall}
-MEAN SPECIFICITY: {mean_specificity}
-MEAN F1: {mean_f1}"""
-    try: send_email(email_server, subject, body)
+
+TRAIN ACCURACY: {train_accuracy}
+TRAIN PRECISION: {train_precision}
+TRAIN RECALL: {train_recall}
+TRAIN SPECIFICITY: {train_specificity}
+TRAIN F1: {train_f1}
+
+TEST ACCURACY: {test_accuracy}
+TEST PRECISION: {test_precision}
+TEST RECALL: {test_recall}
+TEST SPECIFICITY: {test_specificity}
+TEST F1: {test_f1}"""
+    try: send_email(subject, body)
     except Exception as e: print("ERROR", e)
 
     print(f"\n{body}\n")
 
     with open(path.join(output_path, f"summary.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps({
         "time": t_ncv,
-        "mean_accuracy": mean_accuracy,
-        "mean_precision": mean_precision,
-        "mean_recall": mean_recall,
-        "mean_specificity": mean_specificity,
-        "mean_f1": mean_f1
+        "mean_train_perf": {
+            "accuracy": train_accuracy,
+            "precision": train_precision,
+            "recall": train_recall,
+            "specificity": train_specificity,
+            "f1": train_f1
+        },
+        "mean_test_perf": {
+            "accuracy": test_accuracy,
+            "precision": test_precision,
+            "recall": test_recall,
+            "specificity": test_specificity,
+            "f1": test_f1
+        }
     }, indent=4)))
 
 
@@ -311,18 +309,16 @@ MEAN F1: {mean_f1}"""
 if __name__ == "__main__":
 
     if not path.exists("output"): mkdir("output")
-    email_server = create_email_server()
 
     backends.cudnn.benchmark = True
     backends.cudnn.deterministic = False
     set_float32_matmul_precision('high')
 
-    try: send_email(email_server, "NCV LOOP", "Model training has begun")
+    email_string = '\n'.join([model_name for model_name in MODELS.keys()])
+    try: send_email("TRAINING HAS STARTED", email_string)
     except Exception as e: print("ERROR", e)
 
     for model_name, model_architecture in MODELS.items():
         print(model_name)
-        ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN"], test_batch_size=TEST_BATCH_SIZE, subject_list=SUBJECT_LIST, email_server=email_server)
+        ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN"], test_batch_size=TEST_BATCH_SIZE, subject_list=SUBJECT_LIST)
         print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-    
-    email_server.quit()
