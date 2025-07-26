@@ -94,8 +94,8 @@ MODELS = {
         {"type": "batchnorm1d", "num_features": 16},
         {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 32},
         {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "batchnorm1d", "num_features": 1},
         {"type": "flatten"},
         {"type": "linear", "in_features": 32, "out_features": 1}
     ],
