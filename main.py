@@ -1,16 +1,17 @@
+import numpy as np
 from re import sub
 from json import dumps
-import numpy as np
 from os import path, mkdir
-from math import log, exp, prod
 from datetime import datetime
+from math import log, exp, prod
+import matplotlib.pyplot as plt
 from timeit import default_timer
 from warnings import filterwarnings
 
 from torch import cuda, backends
-from torch import set_float32_matmul_precision
-from torch.optim import AdamW, lr_scheduler
 from torch.utils.data import DataLoader
+from torch.optim import AdamW, lr_scheduler
+from torch import set_float32_matmul_precision
 from sklearn.model_selection import StratifiedKFold, ParameterSampler
 filterwarnings("ignore", category=UserWarning, module='sklearn\.model_selection\..*')
 
@@ -137,6 +138,39 @@ NCV_CONFIGS = {
             "THRESHOLD": [0.6]
         }
     }
+}
+
+TUNE_MODEL = [
+    {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7},
+    {"type": "relu"},
+    {"type": "batchnorm1d", "num_features": 16},
+    {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+    {"type": "dropout", "p": 0.2},
+
+    {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 11, "stride": 1, "padding": 5},
+    {"type": "relu"},
+    {"type": "batchnorm1d", "num_features": 32},
+    {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+    {"type": "dropout", "p": 0.2},
+
+    {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 7, "stride": 1, "padding": 3},
+    {"type": "relu"},
+    {"type": "batchnorm1d", "num_features": 64},
+    {"type": "adaptiveavgpool1d", "output_size": 1},
+    {"type": "dropout", "p": 0.4},
+
+    {"type": "flatten"},
+    {"type": "linear", "in_features": 64, "out_features": 1}
+]
+
+TUNE_CONFIG = {
+    "LR": 1e-4,
+    "BATCH_SIZE": 32,
+    "EPOCHS": 50,
+    "ALPHA": 0.3,
+    "GAMMA": 1.4,
+    "THRESHOLD": 0.6,
+    "WEIGHT_DECAY": 1e-4
 }
 
 
@@ -322,18 +356,49 @@ TEST F1: {test_f1}"""
 
 # === MAIN ===
 if __name__ == "__main__":
+    HOLDOUT_SUBJECT_LIST = [subject for subject in SUBJECT_LIST[:5]]
+    FINAL_SUBJECT_LIST = [subject for subject in SUBJECT_LIST[5:]]
 
-    if not path.exists("output"): mkdir("output")
-
-    backends.cudnn.benchmark = True
-    backends.cudnn.deterministic = False
+    backends.cudnn.benchmark = False
+    backends.cudnn.deterministic = True
     set_float32_matmul_precision('high')
 
-    email_string = '\n'.join([model_name for model_name in MODELS.keys()])
-    try: send_email("TRAINING HAS STARTED", email_string)
-    except Exception as e: print("ERROR", e)
+    match input('Tune OR Final (T/F): ').upper():
+        case 'F':
+            if not path.exists("output"): mkdir("output")
 
-    for model_name, model_architecture in MODELS.items():
-        print(model_name)
-        ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN"], test_batch_size=TEST_BATCH_SIZE, subject_list=SUBJECT_LIST)
-        print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+            email_string = '\n'.join([model_name for model_name in MODELS.keys()])
+            try: send_email("TRAINING HAS STARTED", email_string)
+            except Exception as e: print("ERROR", e)
+
+            for model_name, model_architecture in MODELS.items():
+                print(model_name)
+                ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN"], test_batch_size=TEST_BATCH_SIZE, subject_list=FINAL_SUBJECT_LIST)
+                print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+        
+        case 'T':
+            loss_function = FocalLoss(TUNE_CONFIG["ALPHA"], TUNE_CONFIG["GAMMA"], eps=1e-6)
+            for i in range(len(HOLDOUT_SUBJECT_LIST)):
+                test_patient = HOLDOUT_SUBJECT_LIST[i]
+                train_patients = HOLDOUT_SUBJECT_LIST[:i] + HOLDOUT_SUBJECT_LIST[i+1:]
+
+                train_loader = DataLoader(SegmentDataset(train_patients), batch_size=TUNE_CONFIG["BATCH_SIZE"], shuffle=True)
+                test_loader = DataLoader(SegmentDataset([test_patient]), batch_size=TEST_BATCH_SIZE, shuffle=False)
+
+                model = DynamicCNN(TUNE_MODEL).to(DEVICE)
+                optimiser = AdamW(model.parameters(), lr=TUNE_CONFIG["LR"], weight_decay=TUNE_CONFIG["WEIGHT_DECAY"])
+                scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=TUNE_CONFIG["LR"], steps_per_epoch=len(train_loader), epochs=TUNE_CONFIG["EPOCHS"])
+
+                losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, TUNE_CONFIG["EPOCHS"], train_loader)
+                performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=TUNE_CONFIG["THRESHOLD"])
+                performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=TUNE_CONFIG["THRESHOLD"])
+
+                print(f"FOLD {i+1}")
+                print(f"  TRAIN: Loss={performance_train['loss']:.4f} | Accuracy={performance_train['metrics']['accuracy']:.4f} | Precision={performance_train['metrics']['precision']:.4f} | Recall={performance_train['metrics']['recall']:.4f} | Specificity={performance_train['metrics']['specificity']:.4f} | F1={performance_train['metrics']['f1']:.4f}")
+                print(f"  TEST : Loss={performance_test['loss']:.4f} | Accuracy={performance_test['metrics']['accuracy']:.4f} | Precision={performance_test['metrics']['precision']:.4f} | Recall={performance_test['metrics']['recall']:.4f} | Specificity={performance_test['metrics']['specificity']:.4f} | F1={performance_test['metrics']['f1']:.4f}\n")
+
+                # plt.plot(range(1, len(losses)+1), losses)
+                # plt.xlabel("Epoch")
+                # plt.ylabel("Focal Loss")
+                # plt.title(f"Fold {i+1}")
+                # plt.show()
