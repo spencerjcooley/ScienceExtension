@@ -23,6 +23,7 @@ from email.mime.text import MIMEText
 from personal_info import sender_email, receiver_email, password
 
 
+
 # === TOOLS ===
 def send_email(subject: str, body: str):
     server = smtplib.SMTP_SSL("smtp.gmail.com", 465) # 465: SSL | 587: TLS/STARTTLS
@@ -74,17 +75,17 @@ ALPHA = 0.05 # > 0
 TARGET_PERCENTILE = 90 # < 100
 
 MODELS = {
-    "2CONV 8|5_16|5": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 8},
-        {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 16},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
-        {"type": "linear", "in_features": 16, "out_features": 1}
-    ],
+    # "2CONV 8|5_16|5": [
+    #     {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 2},
+    #     {"type": "relu"},
+    #     {"type": "batchnorm1d", "num_features": 8},
+    #     {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+    #     {"type": "relu"},
+    #     {"type": "batchnorm1d", "num_features": 16},
+    #     {"type": "adaptiveavgpool1d", "output_size": 1},
+    #     {"type": "flatten"},
+    #     {"type": "linear", "in_features": 16, "out_features": 1}
+    # ],
     "2CONV 16|5_32|3": [
         {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
         {"type": "relu"},
@@ -95,6 +96,20 @@ MODELS = {
         {"type": "batchnorm1d", "num_features": 32},
         {"type": "adaptiveavgpool1d", "output_size": 1},
         {"type": "flatten"},
+        {"type": "linear", "in_features": 32, "out_features": 1}
+    ],
+    "2CONV 16|5(D)_32|3(D)": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 16},
+        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+        {"type": "dropout", "p": 0.2},
+        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 32},
+        {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "flatten"},
+        {"type": "dropout", "p": 0.2},
         {"type": "linear", "in_features": 32, "out_features": 1}
     ]
 }
