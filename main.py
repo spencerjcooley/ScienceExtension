@@ -76,42 +76,49 @@ ALPHA = 0.05 # > 0
 TARGET_PERCENTILE = 90 # < 100
 
 MODELS = {
-    # "2CONV 8|5_16|5": [
-    #     {"type": "conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 2},
-    #     {"type": "relu"},
-    #     {"type": "batchnorm1d", "num_features": 8},
-    #     {"type": "conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
-    #     {"type": "relu"},
-    #     {"type": "batchnorm1d", "num_features": 16},
-    #     {"type": "adaptiveavgpool1d", "output_size": 1},
-    #     {"type": "flatten"},
-    #     {"type": "linear", "in_features": 16, "out_features": 1}
-    # ],
-    "2CONV 16|5_32|3": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+    "1": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 16},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1},
+        {"type": "dropout", "p": 0.1},
+
+        {"type": "conv1d", "in_channels": 16, "out_channels": 24, "kernel_size": 11, "stride": 1, "padding": 5},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 24},
+        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+        {"type": "dropout", "p": 0.1},
+
+        {"type": "conv1d", "in_channels": 24, "out_channels": 32, "kernel_size": 7, "stride": 1, "padding": 3},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 32},
         {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "dropout", "p": 0.4},
+
         {"type": "flatten"},
         {"type": "linear", "in_features": 32, "out_features": 1}
     ],
-    "2CONV 16|5(D)_32|3(D)": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2},
+    "2": [
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 16},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
         {"type": "dropout", "p": 0.2},
-        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1},
+
+        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 11, "stride": 1, "padding": 5},
         {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 32},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "flatten"},
+        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
         {"type": "dropout", "p": 0.2},
-        {"type": "linear", "in_features": 32, "out_features": 1}
+
+        {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 7, "stride": 1, "padding": 3},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 64},
+        {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "dropout", "p": 0.4},
+
+        {"type": "flatten"},
+        {"type": "linear", "in_features": 64, "out_features": 1}
     ]
 }
 
@@ -125,6 +132,18 @@ NCV_CONFIGS = {
             "ALPHA": [0.7, 0.75, 0.8],
             "GAMMA": [1.75, 2, 2.25],
             "THRESHOLD": [0.4, 0.5, 0.6]
+        }
+    },
+    "MAIN2": {
+        "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))),
+        "GRID": {
+            "LR": [1e-4],
+            "BATCH_SIZE": [32, 64],
+            "EPOCHS": [40, 50, 60],
+            "ALPHA": [0.3, 0.35, 0.4],
+            "GAMMA": [1.3, 1.35, 1.4],
+            "THRESHOLD": [0.4, 0.5, 0.6],
+            "WEIGHT_DECAY": [1e-4]
         }
     },
     "DEBUG": {
@@ -165,7 +184,7 @@ TUNE_MODEL = [
 
 TUNE_CONFIG = {
     "LR": 1e-4,
-    "BATCH_SIZE": 32,
+    "BATCH_SIZE": 64,
     "EPOCHS": 50,
     "ALPHA": 0.3,
     "GAMMA": 1.4,
@@ -372,8 +391,8 @@ if __name__ == "__main__":
             except Exception as e: print("ERROR", e)
 
             for model_name, model_architecture in MODELS.items():
-                print(model_name)
-                ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN"], test_batch_size=TEST_BATCH_SIZE, subject_list=FINAL_SUBJECT_LIST)
+                print(f"MODEL: {model_name}")
+                ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN2"], test_batch_size=TEST_BATCH_SIZE, subject_list=FINAL_SUBJECT_LIST)
                 print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
         
         case 'T':
@@ -397,8 +416,8 @@ if __name__ == "__main__":
                 print(f"  TRAIN: Loss={performance_train['loss']:.4f} | Accuracy={performance_train['metrics']['accuracy']:.4f} | Precision={performance_train['metrics']['precision']:.4f} | Recall={performance_train['metrics']['recall']:.4f} | Specificity={performance_train['metrics']['specificity']:.4f} | F1={performance_train['metrics']['f1']:.4f}")
                 print(f"  TEST : Loss={performance_test['loss']:.4f} | Accuracy={performance_test['metrics']['accuracy']:.4f} | Precision={performance_test['metrics']['precision']:.4f} | Recall={performance_test['metrics']['recall']:.4f} | Specificity={performance_test['metrics']['specificity']:.4f} | F1={performance_test['metrics']['f1']:.4f}\n")
 
-                # plt.plot(range(1, len(losses)+1), losses)
-                # plt.xlabel("Epoch")
-                # plt.ylabel("Focal Loss")
-                # plt.title(f"Fold {i+1}")
-                # plt.show()
+                plt.plot(range(1, len(losses)+1), losses)
+                plt.xlabel("Epoch")
+                plt.ylabel("Focal Loss")
+                plt.title(f"Fold {i+1}")
+                plt.show()
