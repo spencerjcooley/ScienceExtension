@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from timeit import default_timer
 from warnings import filterwarnings
 
+from sys import argv
 from torch import cuda, backends, empty, from_numpy
 from torch.utils.data import DataLoader
 from torch.optim import AdamW, lr_scheduler
@@ -77,23 +78,23 @@ TARGET_PERCENTILE = 90 # < 100
 
 MODELS = {
     "1": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7, "bias": False},
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 13, "stride": 1, "padding": 6, "bias": False},
+        {"type": "relu"},
         {"type": "batchnorm1d", "num_features": 16},
-        {"type": "relu"},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "dropout", "p": 0.1},
-
-        {"type": "conv1d", "in_channels": 16, "out_channels": 24, "kernel_size": 11, "stride": 1, "padding": 5, "bias": False},
-        {"type": "batchnorm1d", "num_features": 24},
-        {"type": "relu"},
-        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "dropout", "p": 0.1},
-
-        {"type": "conv1d", "in_channels": 24, "out_channels": 32, "kernel_size": 7, "stride": 1, "padding": 3, "bias": False},
-        {"type": "batchnorm1d", "num_features": 32},
-        {"type": "relu"},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
         {"type": "dropout", "p": 0.4},
+
+        {"type": "conv1d", "in_channels": 16, "out_channels": 24, "kernel_size": 9, "stride": 1, "padding": 4, "bias": False},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 24},
+        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+        {"type": "dropout", "p": 0.4},
+
+        {"type": "conv1d", "in_channels": 24, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2, "bias": False},
+        {"type": "relu"},
+        {"type": "batchnorm1d", "num_features": 32},
+        {"type": "adaptiveavgpool1d", "output_size": 1},
+        {"type": "dropout", "p": 0.5},
 
         {"type": "flatten"},
         {"type": "linear", "in_features": 32, "out_features": 1}
@@ -137,13 +138,13 @@ NCV_CONFIGS = {
     "MAIN2": {
         "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))),
         "GRID": {
-            "LR": [0.5e-4, 1e-4, 1.5e-4],
+            "LR": [1e-4, 2.5e-4, 5e-4],
             "BATCH_SIZE": [64, 128],
             "EPOCHS": [50, 60],
-            "ALPHA": [0.3, 0.4],
-            "GAMMA": [1.3, 1.35, 1.4],
+            "ALPHA": [0.3, 0.35],
+            "GAMMA": [1.3, 1.4],
             "THRESHOLD": [0.35, 0.4, 0.45],
-            "WEIGHT_DECAY": [0.5e-4, 1e-4, 1.5e-4]
+            "WEIGHT_DECAY": [1e-4, 1.5e-4]
         }
     },
     "DEBUG": {
@@ -160,35 +161,35 @@ NCV_CONFIGS = {
 }
 
 TUNE_MODEL = [
-    {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7, "bias": False},
+    {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 13, "stride": 1, "padding": 6, "bias": False},
     {"type": "relu"},
     {"type": "batchnorm1d", "num_features": 16},
     {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-    {"type": "dropout", "p": 0.2},
-
-    {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 11, "stride": 1, "padding": 5, "bias": False},
-    {"type": "relu"},
-    {"type": "batchnorm1d", "num_features": 32},
-    {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-    {"type": "dropout", "p": 0.2},
-
-    {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 7, "stride": 1, "padding": 3, "bias": False},
-    {"type": "relu"},
-    {"type": "batchnorm1d", "num_features": 64},
-    {"type": "adaptiveavgpool1d", "output_size": 1},
     {"type": "dropout", "p": 0.4},
 
+    {"type": "conv1d", "in_channels": 16, "out_channels": 24, "kernel_size": 9, "stride": 1, "padding": 4, "bias": False},
+    {"type": "relu"},
+    {"type": "batchnorm1d", "num_features": 24},
+    {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+    {"type": "dropout", "p": 0.4},
+
+    {"type": "conv1d", "in_channels": 24, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2, "bias": False},
+    {"type": "relu"},
+    {"type": "batchnorm1d", "num_features": 32},
+    {"type": "adaptiveavgpool1d", "output_size": 1},
+    {"type": "dropout", "p": 0.5},
+
     {"type": "flatten"},
-    {"type": "linear", "in_features": 64, "out_features": 1}
+    {"type": "linear", "in_features": 32, "out_features": 1}
 ]
 
 TUNE_CONFIG = {
-    "LR": 1e-4,
+    "LR": 5e-4,
     "BATCH_SIZE": 64,
     "EPOCHS": 50,
     "ALPHA": 0.3,
     "GAMMA": 1.4,
-    "THRESHOLD": 0.5,
+    "THRESHOLD": 0.4,
     "WEIGHT_DECAY": 1e-4
 }
 
@@ -381,12 +382,14 @@ if __name__ == "__main__":
     HOLDOUT_SUBJECT_LIST = [SUBJECT_LIST[i] for i in HOLDOUT_LIST]
     EVAL_SUBJECT_LIST = [SUBJECT_LIST[i] for i in EVAL_LIST]
 
-    backends.cudnn.benchmark = True
-    backends.cudnn.deterministic = False
+
     set_float32_matmul_precision('high')
 
-    match input('Tune OR Final (T/F): ').upper():
+    match argv[1].upper():
         case 'F':
+            backends.cudnn.benchmark = True
+            backends.cudnn.deterministic = False
+
             if not path.exists("output"): mkdir("output")
 
             email_string = '\n'.join([model_name for model_name in MODELS.keys()])
@@ -399,6 +402,9 @@ if __name__ == "__main__":
                 print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
         
         case 'T':
+            backends.cudnn.benchmark = False
+            backends.cudnn.deterministic = True
+
             loss_function = FocalLoss(TUNE_CONFIG["ALPHA"], TUNE_CONFIG["GAMMA"], eps=1e-6)
 
             def add_gaussian_noise(signal, noise_std=0.005):
@@ -414,4 +420,22 @@ if __name__ == "__main__":
                 TRAINING_SET.append(SubjectData(add_gaussian_noise(recording.x), recording.y))
                 TRAINING_SET.append(SubjectData(recording.x * empty(1).uniform_(0.9, 1.1).item(), recording.y))
 
-            print(len(TRAINING_SET))
+            train_loader = DataLoader(SegmentDataset(TRAINING_SET), TUNE_CONFIG["BATCH_SIZE"], shuffle=True, pin_memory=True)
+            test_loader = DataLoader(SegmentDataset(TESTING_SET), TEST_BATCH_SIZE, shuffle=False, pin_memory=True)
+            loss_function = FocalLoss(TUNE_CONFIG["ALPHA"], TUNE_CONFIG["GAMMA"], eps=1e-6)
+
+            model = DynamicCNN(TUNE_MODEL).to(DEVICE)
+            optimiser = AdamW(model.parameters(), lr=TUNE_CONFIG["LR"])
+            scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=TUNE_CONFIG["LR"], steps_per_epoch=len(train_loader), epochs=TUNE_CONFIG["EPOCHS"])
+
+            losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, TUNE_CONFIG["EPOCHS"], train_loader)
+            performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=TUNE_CONFIG["THRESHOLD"])
+            performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=TUNE_CONFIG["THRESHOLD"])
+            print(f"TRAIN: {dumps(performance_train['metrics'], indent=4)}")
+            print(f"TEST : {dumps(performance_test['metrics'], indent=4)}")
+
+            plt.plot(range(1, len(losses)+1), losses)
+            plt.xlabel("Epochs")
+            plt.ylabel("Focal Loss")
+            plt.title(f"Epoch vs Loss")
+            plt.show()
