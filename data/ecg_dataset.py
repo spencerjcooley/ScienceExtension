@@ -4,10 +4,14 @@ import torch
 from torch.utils.data import Dataset
 
 class SubjectData:
-    def __init__(self, segments: np.array, labels: np.array):
-        self.x = torch.tensor(segments, dtype=torch.float32).unsqueeze(1)
-        self.y = torch.tensor(labels, dtype=torch.float32)
-    
+    def __init__(self, segments, labels):
+        if isinstance(segments, torch.Tensor):
+            self.x = segments.detach().clone().float()
+            if self.x.dim() == 2: self.x = self.x.unsqueeze(1)
+        else: self.x = torch.tensor(segments, dtype=torch.float32).unsqueeze(1)
+        if isinstance(labels, torch.Tensor): self.y = labels.detach().clone().float()
+        else: self.y = torch.tensor(labels, dtype=torch.float32)
+
     def __len__(self): return len(self.y)
     
 class SubjectList:

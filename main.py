@@ -8,14 +8,14 @@ import matplotlib.pyplot as plt
 from timeit import default_timer
 from warnings import filterwarnings
 
-from torch import cuda, backends
+from torch import cuda, backends, empty, from_numpy
 from torch.utils.data import DataLoader
 from torch.optim import AdamW, lr_scheduler
 from torch import set_float32_matmul_precision
 from sklearn.model_selection import StratifiedKFold, ParameterSampler
 filterwarnings("ignore", category=UserWarning, module='sklearn\.model_selection\..*')
 
-from data import SubjectList, SegmentDataset
+from data import SubjectList, SegmentDataset, SubjectData
 from model import DynamicCNN, train_model, evaluate_model, FocalLoss
 
 # Email notifications when away from computer
@@ -188,7 +188,7 @@ TUNE_CONFIG = {
     "EPOCHS": 50,
     "ALPHA": 0.3,
     "GAMMA": 1.4,
-    "THRESHOLD": 0.6,
+    "THRESHOLD": 0.5,
     "WEIGHT_DECAY": 1e-4
 }
 
@@ -375,8 +375,11 @@ TEST F1: {test_f1}"""
 
 # === MAIN ===
 if __name__ == "__main__":
-    HOLDOUT_SUBJECT_LIST = [subject for subject in SUBJECT_LIST[:5]]
-    FINAL_SUBJECT_LIST = [subject for subject in SUBJECT_LIST[5:]]
+    HOLDOUT_LIST = [0, 1, 22, 25, 26]
+    EVAL_LIST = list(range(2, 22)) + [23, 24] + list(range(27, 35))
+
+    HOLDOUT_SUBJECT_LIST = [SUBJECT_LIST[i] for i in HOLDOUT_LIST]
+    EVAL_SUBJECT_LIST = [SUBJECT_LIST[i] for i in EVAL_LIST]
 
     backends.cudnn.benchmark = True
     backends.cudnn.deterministic = False
@@ -392,32 +395,23 @@ if __name__ == "__main__":
 
             for model_name, model_architecture in MODELS.items():
                 print(f"MODEL: {model_name}")
-                ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN2"], test_batch_size=TEST_BATCH_SIZE, subject_list=FINAL_SUBJECT_LIST)
+                ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN2"], test_batch_size=TEST_BATCH_SIZE, subject_list=EVAL_SUBJECT_LIST)
                 print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
         
         case 'T':
             loss_function = FocalLoss(TUNE_CONFIG["ALPHA"], TUNE_CONFIG["GAMMA"], eps=1e-6)
-            for i in range(len(HOLDOUT_SUBJECT_LIST)):
-                test_patient = HOLDOUT_SUBJECT_LIST[i]
-                train_patients = HOLDOUT_SUBJECT_LIST[:i] + HOLDOUT_SUBJECT_LIST[i+1:]
 
-                train_loader = DataLoader(SegmentDataset(train_patients), batch_size=TUNE_CONFIG["BATCH_SIZE"], shuffle=True)
-                test_loader = DataLoader(SegmentDataset([test_patient]), batch_size=TEST_BATCH_SIZE, shuffle=False)
+            def add_gaussian_noise(signal, noise_std=0.005):
+                return signal + from_numpy(np.random.normal(0, noise_std, signal.shape))
 
-                model = DynamicCNN(TUNE_MODEL).to(DEVICE)
-                optimiser = AdamW(model.parameters(), lr=TUNE_CONFIG["LR"], weight_decay=TUNE_CONFIG["WEIGHT_DECAY"])
-                scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=TUNE_CONFIG["LR"], steps_per_epoch=len(train_loader), epochs=TUNE_CONFIG["EPOCHS"])
+            RAW_TRAINING_SET = [HOLDOUT_SUBJECT_LIST[0], HOLDOUT_SUBJECT_LIST[4]] # 1 Class A, 1 Class C
+            TESTING_SET = HOLDOUT_SUBJECT_LIST[1:4] # 1 From Each Class
 
-                losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, TUNE_CONFIG["EPOCHS"], train_loader)
-                performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=TUNE_CONFIG["THRESHOLD"])
-                performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=TUNE_CONFIG["THRESHOLD"])
+            TRAINING_SET = []
 
-                print(f"FOLD {i+1}")
-                print(f"  TRAIN: Loss={performance_train['loss']:.4f} | Accuracy={performance_train['metrics']['accuracy']:.4f} | Precision={performance_train['metrics']['precision']:.4f} | Recall={performance_train['metrics']['recall']:.4f} | Specificity={performance_train['metrics']['specificity']:.4f} | F1={performance_train['metrics']['f1']:.4f}")
-                print(f"  TEST : Loss={performance_test['loss']:.4f} | Accuracy={performance_test['metrics']['accuracy']:.4f} | Precision={performance_test['metrics']['precision']:.4f} | Recall={performance_test['metrics']['recall']:.4f} | Specificity={performance_test['metrics']['specificity']:.4f} | F1={performance_test['metrics']['f1']:.4f}\n")
+            for recording in RAW_TRAINING_SET:
+                TRAINING_SET.append(recording)
+                TRAINING_SET.append(SubjectData(add_gaussian_noise(recording.x), recording.y))
+                TRAINING_SET.append(SubjectData(recording.x * empty(1).uniform_(0.9, 1.1).item(), recording.y))
 
-                plt.plot(range(1, len(losses)+1), losses)
-                plt.xlabel("Epoch")
-                plt.ylabel("Focal Loss")
-                plt.title(f"Fold {i+1}")
-                plt.show()
+            print(len(TRAINING_SET))
