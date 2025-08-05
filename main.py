@@ -44,7 +44,7 @@ def insert_arithmetic_means(start: int, end: int, n_means: int, is_int: bool = T
     d = (end - start)/(n_means + 1)
     return [round(start + i * d) for i in range(n_means + 2)] if is_int else [start + i * d for i in range(n_means + 2)]
 
-def stratified_subject_split(subject_list: SubjectList, n_splits: int = 5, seed: int = 42):
+def stratified_subject_split(subject_list: list, n_splits: int = 5, seed: int = 42):
     subjects = subject_list
     n_subjects = len(subjects)
     prevalence = np.array([subject.y.mean().item() for subject in subjects])
@@ -77,21 +77,21 @@ TARGET_PERCENTILE = 90 # < 100
 
 MODELS = {
     "1": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7},
-        {"type": "relu"},
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7, "bias": False},
         {"type": "batchnorm1d", "num_features": 16},
+        {"type": "relu"},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
         {"type": "dropout", "p": 0.1},
 
-        {"type": "conv1d", "in_channels": 16, "out_channels": 24, "kernel_size": 11, "stride": 1, "padding": 5},
-        {"type": "relu"},
+        {"type": "conv1d", "in_channels": 16, "out_channels": 24, "kernel_size": 11, "stride": 1, "padding": 5, "bias": False},
         {"type": "batchnorm1d", "num_features": 24},
+        {"type": "relu"},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
         {"type": "dropout", "p": 0.1},
 
-        {"type": "conv1d", "in_channels": 24, "out_channels": 32, "kernel_size": 7, "stride": 1, "padding": 3},
-        {"type": "relu"},
+        {"type": "conv1d", "in_channels": 24, "out_channels": 32, "kernel_size": 7, "stride": 1, "padding": 3, "bias": False},
         {"type": "batchnorm1d", "num_features": 32},
+        {"type": "relu"},
         {"type": "adaptiveavgpool1d", "output_size": 1},
         {"type": "dropout", "p": 0.4},
 
@@ -99,21 +99,21 @@ MODELS = {
         {"type": "linear", "in_features": 32, "out_features": 1}
     ],
     "2": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7},
-        {"type": "relu"},
+        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7, "bias": False},
         {"type": "batchnorm1d", "num_features": 16},
+        {"type": "relu"},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
         {"type": "dropout", "p": 0.2},
 
-        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 11, "stride": 1, "padding": 5},
-        {"type": "relu"},
+        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 11, "stride": 1, "padding": 5, "bias": False},
         {"type": "batchnorm1d", "num_features": 32},
+        {"type": "relu"},
         {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
         {"type": "dropout", "p": 0.2},
 
-        {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 7, "stride": 1, "padding": 3},
-        {"type": "relu"},
+        {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 7, "stride": 1, "padding": 3, "bias": False},
         {"type": "batchnorm1d", "num_features": 64},
+        {"type": "relu"},
         {"type": "adaptiveavgpool1d", "output_size": 1},
         {"type": "dropout", "p": 0.4},
 
@@ -137,13 +137,13 @@ NCV_CONFIGS = {
     "MAIN2": {
         "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))),
         "GRID": {
-            "LR": [1e-4],
-            "BATCH_SIZE": [32, 64],
-            "EPOCHS": [40, 50, 60],
-            "ALPHA": [0.3, 0.35, 0.4],
+            "LR": [0.5e-4, 1e-4, 1.5e-4],
+            "BATCH_SIZE": [64, 128],
+            "EPOCHS": [50, 60],
+            "ALPHA": [0.3, 0.4],
             "GAMMA": [1.3, 1.35, 1.4],
-            "THRESHOLD": [0.4, 0.5, 0.6],
-            "WEIGHT_DECAY": [1e-4]
+            "THRESHOLD": [0.35, 0.4, 0.45],
+            "WEIGHT_DECAY": [0.5e-4, 1e-4, 1.5e-4]
         }
     },
     "DEBUG": {
@@ -160,19 +160,19 @@ NCV_CONFIGS = {
 }
 
 TUNE_MODEL = [
-    {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7},
+    {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7, "bias": False},
     {"type": "relu"},
     {"type": "batchnorm1d", "num_features": 16},
     {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
     {"type": "dropout", "p": 0.2},
 
-    {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 11, "stride": 1, "padding": 5},
+    {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 11, "stride": 1, "padding": 5, "bias": False},
     {"type": "relu"},
     {"type": "batchnorm1d", "num_features": 32},
     {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
     {"type": "dropout", "p": 0.2},
 
-    {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 7, "stride": 1, "padding": 3},
+    {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 7, "stride": 1, "padding": 3, "bias": False},
     {"type": "relu"},
     {"type": "batchnorm1d", "num_features": 64},
     {"type": "adaptiveavgpool1d", "output_size": 1},
@@ -207,8 +207,8 @@ def cv(k: int, model_architecture: dict, config: dict, test_batch_size: int, sub
     for i, (train_list, test_list) in enumerate(sfk, 1):
         t_fold = default_timer()
 
-        train_loader = DataLoader(SegmentDataset(train_list), config["BATCH_SIZE"], shuffle=True)
-        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=False)
+        train_loader = DataLoader(SegmentDataset(train_list), config["BATCH_SIZE"], shuffle=True, pin_memory=True)
+        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=False, pin_memory=True)
 
         model = DynamicCNN(model_architecture).to(DEVICE)
         optimiser = AdamW(model.parameters(), lr=config["LR"])
@@ -248,7 +248,7 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
     print(f"  NCV TRIAL {start_time.strftime('%d/%m/%Y %H:%M:%S')} | ITERATIONS {config_iterations} | COVERAGE {100*config_iterations/prod([len(x) for x in hyperparameters['GRID'].values()]):3f}%")
 
     mkdir(output_path)
-    sfk = stratified_subject_split(subject_list.subjects, outer_k, random_seed)
+    sfk = stratified_subject_split(subject_list, outer_k, random_seed)
     for i_outer, (train_list, test_list) in enumerate(sfk, 1):
         print(f"    OUTER FOLD {i_outer:02d}")
         t_outer = default_timer()
@@ -275,8 +275,8 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
 
         t_model = default_timer()
 
-        train_loader = DataLoader(SegmentDataset(train_list), best_config["BATCH_SIZE"], shuffle=True)
-        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=False)
+        train_loader = DataLoader(SegmentDataset(train_list), best_config["BATCH_SIZE"], shuffle=True, pin_memory=True)
+        test_loader = DataLoader(SegmentDataset(test_list), test_batch_size, shuffle=False, pin_memory=True)
         loss_function = FocalLoss(best_config["ALPHA"], best_config["GAMMA"], eps=1e-6)
 
         model = DynamicCNN(model_architecture).to(DEVICE)
@@ -378,8 +378,8 @@ if __name__ == "__main__":
     HOLDOUT_SUBJECT_LIST = [subject for subject in SUBJECT_LIST[:5]]
     FINAL_SUBJECT_LIST = [subject for subject in SUBJECT_LIST[5:]]
 
-    backends.cudnn.benchmark = False
-    backends.cudnn.deterministic = True
+    backends.cudnn.benchmark = True
+    backends.cudnn.deterministic = False
     set_float32_matmul_precision('high')
 
     match input('Tune OR Final (T/F): ').upper():
