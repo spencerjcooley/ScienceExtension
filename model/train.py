@@ -1,8 +1,7 @@
 from torch.nn import Module
+from torch import sigmoid, no_grad
 from torch.nn.utils import clip_grad_norm_
 from torch.amp import autocast, GradScaler
-from torch import sigmoid, no_grad
-
 
 class FocalLoss(Module):
     def __init__(self, alpha, gamma, eps, reduction = 'mean'):
@@ -22,22 +21,18 @@ class FocalLoss(Module):
         elif self.reduction == 'sum': return focal_loss.sum()
         else: return focal_loss
 
-
-
 def train_model(model, optimiser, scheduler, loss_function, device, epochs, dataloader):
     losses = []
     scaler = GradScaler(device=device)
-
     model.train()
+
     for epoch in range(epochs):
         epoch_loss = 0.0
         n_samples = 0
 
         for x_batch, y_batch in dataloader:
-            x_batch = x_batch.to(device)
-            y_batch = y_batch.to(device)
-
-            optimiser.zero_grad()
+            x_batch, y_batch = x_batch.to(device, non_blocking=True), y_batch.to(device, non_blocking=True)
+            optimiser.zero_grad(set_to_none=True)
 
             with autocast(device_type=device):
                 logits = model(x_batch).squeeze(1)
@@ -52,15 +47,12 @@ def train_model(model, optimiser, scheduler, loss_function, device, epochs, data
             clip_grad_norm_(model.parameters(), max_norm=1)
             scaler.step(optimiser)
             scaler.update()
-
             scheduler.step()
 
         avg_loss = epoch_loss / n_samples
         losses.append(avg_loss)
 
     return losses
-
-
 
 def evaluate_model(model, device, loss_function, dataloader, threshold=0.5):
     total_loss, total_segments = 0.0, 0
@@ -69,8 +61,7 @@ def evaluate_model(model, device, loss_function, dataloader, threshold=0.5):
     model.eval()
     with no_grad():
         for x_batch, y_batch in dataloader:
-            x_batch = x_batch.to(device)
-            y_batch = y_batch.to(device)
+            x_batch, y_batch = x_batch.to(device, non_blocking=True), y_batch.to(device, non_blocking=True)
 
             with autocast(device_type=device):
                 logits = model(x_batch).squeeze(1)
@@ -80,11 +71,11 @@ def evaluate_model(model, device, loss_function, dataloader, threshold=0.5):
             total_loss += loss.item() * batch_size
             total_segments += batch_size
 
-            predictions = (sigmoid(logits) >= threshold).float()
-            TP += (predictions * y_batch).sum().item()
-            TN += ((1 - predictions) * (1 - y_batch)).sum().item()
-            FP += (predictions * (1 - y_batch)).sum().item()
-            FN += ((1 - predictions) * y_batch).sum().item()
+            predictions = (sigmoid(logits) >= threshold)
+            TP += (predictions * y_batch.bool()).sum().item()
+            TN += ((~predictions) * (~y_batch.bool())).sum().item()
+            FP += (predictions * (~y_batch.bool())).sum().item()
+            FN += ((~predictions) * y_batch.bool()).sum().item()
 
     precision = TP / (TP + FP) if (TP + FP) > 0 else 0
     recall = TP / (TP + FN) if (TP + FN) > 0 else 0
