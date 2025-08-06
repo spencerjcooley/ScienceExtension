@@ -196,7 +196,7 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
 
     t_ncv = default_timer()
     start_time = datetime.now()
-    output_path = path.join(path.abspath("output"), f"data-{start_time.strftime('%Y%m%d-%H%M%S')}")
+    output_path = path.join(path.abspath("final_output"), f"data-{start_time.strftime('%Y%m%d-%H%M%S')}")
     config_iterations = hyperparameters["ITERATIONS"]
 
     print(f"  NCV TRIAL {start_time.strftime('%d/%m/%Y %H:%M:%S')} | ITERATIONS {config_iterations} | COVERAGE {100*config_iterations/prod([len(x) for x in hyperparameters['GRID'].values()]):3f}%")
@@ -364,7 +364,8 @@ if __name__ == "__main__":
             t_TOTAL = default_timer()
             backends.cudnn.benchmark = True
             backends.cudnn.deterministic = False
-            
+
+            if not path.exists("final_output"): mkdir("final_output")
             output_path, output = ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name="FINAL", model_architecture=FINAL_MODEL, hyperparameters=FINAL_CONFIG, test_batch_size=TEST_BATCH_SIZE, subject_list=NCV_SUBJECT_LIST)
             
             TRAINING_SUBJECT_LIST = HOLDOUT_SUBJECT_LIST + NCV_SUBJECT_LIST
@@ -395,7 +396,7 @@ if __name__ == "__main__":
             backends.cudnn.benchmark = True
             backends.cudnn.deterministic = False
 
-            if not path.exists("output"): mkdir("output")
+            if not path.exists("final_output"): mkdir("final_output")
 
             ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name="NCV", model_architecture=FINAL_MODEL, hyperparameters=FINAL_CONFIG, test_batch_size=TEST_BATCH_SIZE, subject_list=NCV_SUBJECT_LIST)
             print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
