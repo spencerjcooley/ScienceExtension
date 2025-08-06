@@ -376,15 +376,17 @@ if __name__ == "__main__":
 
             model = DynamicCNN(FINAL_MODEL).to(DEVICE)
             optimiser = AdamW(model.parameters(), lr=output["LR"])
-            scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=output["LR"], steps_per_epoch=len(train_loader), epochs=output["EPOCHS"])
+            scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=output["LR"], steps_per_epoch=len(train_loader), epochs=output["EPOCHS"] * ((1-1/OUTER_K)*(1-1/INNER_K)*30))
 
-            losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, output["EPOCHS"], train_loader)
+            losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, output["EPOCHS"] * ((1-1/OUTER_K)*(1-1/INNER_K)*30), train_loader)
             performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=output["THRESHOLD"])
             performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=output["THRESHOLD"])
             print(f"TRAIN: {dumps(performance_train['metrics'], indent=4)}")
             print(f"TEST : {dumps(performance_test['metrics'], indent=4)}")
             
             with open(path.join(output_path, f"ncv_summary.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps({
+                "hyperparameters": output,
+                "losses": losses,
                 "train_perf": performance_train,
                 "test_perf": performance_test
             }, indent=4)))
