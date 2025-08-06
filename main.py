@@ -5,6 +5,7 @@ from os import path, mkdir
 from datetime import datetime
 from math import log, exp, prod
 import matplotlib.pyplot as plt
+from collections import Counter
 from timeit import default_timer
 from warnings import filterwarnings
 
@@ -76,90 +77,6 @@ TEST_BATCH_SIZE = 512
 ALPHA = 0.05 # > 0
 TARGET_PERCENTILE = 90 # < 100
 
-MODELS = {
-    "1": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 13, "stride": 1, "padding": 6, "bias": False},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 16},
-        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "dropout", "p": 0.4},
-
-        {"type": "conv1d", "in_channels": 16, "out_channels": 24, "kernel_size": 9, "stride": 1, "padding": 4, "bias": False},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 24},
-        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "dropout", "p": 0.4},
-
-        {"type": "conv1d", "in_channels": 24, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2, "bias": False},
-        {"type": "relu"},
-        {"type": "batchnorm1d", "num_features": 32},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "dropout", "p": 0.5},
-
-        {"type": "flatten"},
-        {"type": "linear", "in_features": 32, "out_features": 1}
-    ],
-    "2": [
-        {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 15, "stride": 1, "padding": 7, "bias": False},
-        {"type": "batchnorm1d", "num_features": 16},
-        {"type": "relu"},
-        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "dropout", "p": 0.2},
-
-        {"type": "conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 11, "stride": 1, "padding": 5, "bias": False},
-        {"type": "batchnorm1d", "num_features": 32},
-        {"type": "relu"},
-        {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
-        {"type": "dropout", "p": 0.2},
-
-        {"type": "conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 7, "stride": 1, "padding": 3, "bias": False},
-        {"type": "batchnorm1d", "num_features": 64},
-        {"type": "relu"},
-        {"type": "adaptiveavgpool1d", "output_size": 1},
-        {"type": "dropout", "p": 0.4},
-
-        {"type": "flatten"},
-        {"type": "linear", "in_features": 64, "out_features": 1}
-    ]
-}
-
-NCV_CONFIGS = {
-    "MAIN": {
-        "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))), # Iteration estimation via X~Bin(n,p) | Ceiling Function
-        "GRID": {
-            "LR": insert_logarithmic_means(start=1e-4, end=3e-4, n_means=2, is_int=False),
-            "BATCH_SIZE": [64, 128],
-            "EPOCHS": insert_logarithmic_means(start=50, end=80, n_means=1),
-            "ALPHA": [0.7, 0.75, 0.8],
-            "GAMMA": [1.75, 2, 2.25],
-            "THRESHOLD": [0.4, 0.5, 0.6]
-        }
-    },
-    "MAIN2": {
-        "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))),
-        "GRID": {
-            "LR": [1e-4, 2.5e-4, 5e-4],
-            "BATCH_SIZE": [64, 128],
-            "EPOCHS": [50, 60],
-            "ALPHA": [0.3, 0.35],
-            "GAMMA": [1.3, 1.4],
-            "THRESHOLD": [0.35, 0.4, 0.45],
-            "WEIGHT_DECAY": [1e-4, 1.5e-4]
-        }
-    },
-    "DEBUG": {
-        "ITERATIONS": 1,
-        "GRID": {
-            "LR": [1e-3],
-            "BATCH_SIZE": [64],
-            "EPOCHS": [10],
-            "ALPHA": [0.75],
-            "GAMMA": [2.0],
-            "THRESHOLD": [0.6]
-        }
-    }
-}
-
 TUNE_MODEL = [
     {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 13, "stride": 1, "padding": 6, "bias": False},
     {"type": "relu"},
@@ -191,6 +108,42 @@ TUNE_CONFIG = {
     "GAMMA": 1.4,
     "THRESHOLD": 0.4,
     "WEIGHT_DECAY": 1e-4
+}
+
+FINAL_MODEL = [
+    {"type": "conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 13, "stride": 1, "padding": 6, "bias": False},
+    {"type": "relu"},
+    {"type": "batchnorm1d", "num_features": 16},
+    {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+    {"type": "dropout", "p": 0.4},
+
+    {"type": "conv1d", "in_channels": 16, "out_channels": 24, "kernel_size": 9, "stride": 1, "padding": 4, "bias": False},
+    {"type": "relu"},
+    {"type": "batchnorm1d", "num_features": 24},
+    {"type": "maxpool1d", "kernel_size": 2, "stride": 2},
+    {"type": "dropout", "p": 0.4},
+
+    {"type": "conv1d", "in_channels": 24, "out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2, "bias": False},
+    {"type": "relu"},
+    {"type": "batchnorm1d", "num_features": 32},
+    {"type": "adaptiveavgpool1d", "output_size": 1},
+    {"type": "dropout", "p": 0.5},
+
+    {"type": "flatten"},
+    {"type": "linear", "in_features": 32, "out_features": 1}
+]
+
+FINAL_CONFIG = {
+    "ITERATIONS": int(-(-log(ALPHA) // log((TARGET_PERCENTILE/100)))), # Iteration estimation via X~Bin(n,p) | Ceiling Function
+    "GRID": {
+        "LR": [1e-4, 2.5e-4, 5e-4],
+        "BATCH_SIZE": [64, 128],
+        "EPOCHS": [50, 60],
+        "ALPHA": [0.3, 0.35],
+        "GAMMA": [1.3, 1.4],
+        "THRESHOLD": [0.35, 0.4, 0.45],
+        "WEIGHT_DECAY": [1e-4, 1.5e-4]
+    }
 }
 
 
@@ -239,7 +192,7 @@ def cv(k: int, model_architecture: dict, config: dict, test_batch_size: int, sub
 
 
 def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, hyperparameters: dict, test_batch_size: int, subject_list: SubjectList, random_seed: int = 42):
-    train_perfs, test_perfs = [], []
+    train_perfs, test_perfs, best_configs = [], [], []
 
     t_ncv = default_timer()
     start_time = datetime.now()
@@ -262,6 +215,7 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
             "configs": {}
         }
 
+        # === INNER FOLD RANDOM SEARCH ===
         configs = list(ParameterSampler(hyperparameters["GRID"], config_iterations, random_state=np.random.RandomState(random_seed+i_outer)))
         for i_config, config in enumerate(configs, 1):            
             config_data = cv(inner_k, model_architecture, config, test_batch_size, train_list, random_seed=random_seed)
@@ -289,6 +243,7 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
         performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=best_config["THRESHOLD"])
         train_perfs.append(performance_train)
         test_perfs.append(performance_test)
+        best_configs.append(best_config)
 
         t_model = default_timer() - t_model
 
@@ -305,8 +260,8 @@ def ncv(outer_k: int, inner_k: int, model_name: str, model_architecture: dict, h
             "test_perf": performance_test
         }
 
+        # === LOGGING + SAVING DATA ===
         print(f"""    OUTER MODEL {i_outer:02d}  | TIME: {f"{t_model:.7f}"[:8]} | F1: {f"{performance_test['metrics']['f1']:.7f}"[:8]}\n""")
-
         subject = f"""OUTER {i_outer:02d} | {model_name} | TIME: {f"{t_model:.7f}"[:8]}"""
         body = f"""TIME: {t_model}
 ARCHITECTURE: {sub(REGEX, replace_func, dumps(model_architecture, indent=4))}
@@ -318,9 +273,9 @@ TRAINING PERFORMANCE: {dumps(performance_train, indent=4)}
 TESTING PERFORMANCE: {dumps(performance_test, indent=4)}"""
         try: send_email(subject, body)
         except Exception as e: print("ERROR", e)
-
         with open(path.join(output_path, f"{i_outer}.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps(output, indent=4)))
 
+    # === MEAN METRICS ===
     test_accuracy = np.mean([perf["metrics"]["accuracy"] for perf in test_perfs])
     test_precision = np.mean([perf["metrics"]["precision"] for perf in test_perfs])
     test_recall = np.mean([perf["metrics"]["recall"] for perf in test_perfs])
@@ -354,7 +309,7 @@ TEST F1: {test_f1}"""
 
     print(f"\n{body}\n")
 
-    with open(path.join(output_path, f"summary.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps({
+    with open(path.join(output_path, f"ncv_summary.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps({
         "time": t_ncv,
         "mean_train_perf": {
             "accuracy": train_accuracy,
@@ -371,6 +326,25 @@ TEST F1: {test_f1}"""
             "f1": test_f1
         }
     }, indent=4)))
+        
+    # === OPTIMAL CONFIG ===
+    BEST_LR = Counter([config["LR"] for config in best_configs])
+    BEST_BATCH_SIZE = Counter([config["BATCH_SIZE"] for config in best_configs])
+    BEST_EPOCHS = Counter([config["EPOCHS"] for config in best_configs])
+    BEST_ALPHA = Counter([config["ALPHA"] for config in best_configs])
+    BEST_GAMMA = Counter([config["GAMMA"] for config in best_configs])
+    BEST_THRESHOLD = Counter([config["THRESHOLD"] for config in best_configs])
+    BEST_WEIGHT_DECAY = Counter([config["WEIGHT_DECAY"] for config in best_configs])
+
+    return output_path, {
+        "LR": max([key for key, value in BEST_LR.items() if value == BEST_LR.most_common()[0][1]]),
+        "BATCH_SIZE": max([key for key, value in BEST_BATCH_SIZE.items() if value == BEST_BATCH_SIZE.most_common()[0][1]]),
+        "EPOCHS": max([key for key, value in BEST_EPOCHS.items() if value == BEST_EPOCHS.most_common()[0][1]]),
+        "ALPHA": max([key for key, value in BEST_ALPHA.items() if value == BEST_ALPHA.most_common()[0][1]]),
+        "GAMMA": max([key for key, value in BEST_GAMMA.items() if value == BEST_GAMMA.most_common()[0][1]]),
+        "THRESHOLD": max([key for key, value in BEST_THRESHOLD.items() if value == BEST_THRESHOLD.most_common()[0][1]]),
+        "WEIGHT_DECAY": max([key for key, value in BEST_WEIGHT_DECAY.items() if value == BEST_WEIGHT_DECAY.most_common()[0][1]])
+    }
 
 
 
@@ -380,28 +354,53 @@ if __name__ == "__main__":
     EVAL_LIST = list(range(2, 22)) + [23, 24] + list(range(27, 35))
 
     HOLDOUT_SUBJECT_LIST = [SUBJECT_LIST[i] for i in HOLDOUT_LIST]
-    EVAL_SUBJECT_LIST = [SUBJECT_LIST[i] for i in EVAL_LIST]
-
+    NCV_SUBJECT_LIST = [SUBJECT_LIST[i] for i in EVAL_LIST]
+    TEST_SUBJECT_LIST = SUBJECT_LIST[35:]
 
     set_float32_matmul_precision('high')
 
     match argv[1].upper():
-        case 'F':
+        case 'FINAL':
+            t_TOTAL = default_timer()
+            backends.cudnn.benchmark = True
+            backends.cudnn.deterministic = False
+            
+            output_path, output = ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name="FINAL", model_architecture=FINAL_MODEL, hyperparameters=FINAL_CONFIG, test_batch_size=TEST_BATCH_SIZE, subject_list=NCV_SUBJECT_LIST)
+            
+            TRAINING_SUBJECT_LIST = HOLDOUT_SUBJECT_LIST + NCV_SUBJECT_LIST
+
+            train_loader = DataLoader(SegmentDataset(TRAINING_SUBJECT_LIST), output["BATCH_SIZE"], shuffle=True, pin_memory=True)
+            test_loader = DataLoader(SegmentDataset(TEST_SUBJECT_LIST), TEST_BATCH_SIZE, shuffle=False, pin_memory=True)
+            loss_function = FocalLoss(output["ALPHA"], output["GAMMA"], eps=1e-6)
+
+            model = DynamicCNN(FINAL_MODEL).to(DEVICE)
+            optimiser = AdamW(model.parameters(), lr=output["LR"])
+            scheduler = lr_scheduler.OneCycleLR(optimiser, max_lr=output["LR"], steps_per_epoch=len(train_loader), epochs=output["EPOCHS"])
+
+            losses = train_model(model, optimiser, scheduler, loss_function, DEVICE, output["EPOCHS"], train_loader)
+            performance_train = evaluate_model(model, DEVICE, loss_function, train_loader, threshold=output["THRESHOLD"])
+            performance_test = evaluate_model(model, DEVICE, loss_function, test_loader, threshold=output["THRESHOLD"])
+            print(f"TRAIN: {dumps(performance_train['metrics'], indent=4)}")
+            print(f"TEST : {dumps(performance_test['metrics'], indent=4)}")
+            
+            with open(path.join(output_path, f"ncv_summary.json"), "w", encoding="utf8") as file: file.write(sub(REGEX, replace_func, dumps({
+                "train_perf": performance_train,
+                "test_perf": performance_test
+            }, indent=4)))
+
+            try: send_email(f"FINAL EVALUATION COMPLETED", f"TIME: {default_timer() - t_TOTAL}\n\n{dumps({'TRAIN': performance_train, 'TEST:': performance_test}, indent=4)}")
+            except Exception as e: print("ERROR", e)
+    
+        case 'NCV':
             backends.cudnn.benchmark = True
             backends.cudnn.deterministic = False
 
             if not path.exists("output"): mkdir("output")
 
-            email_string = '\n'.join([model_name for model_name in MODELS.keys()])
-            try: send_email("TRAINING HAS STARTED", email_string)
-            except Exception as e: print("ERROR", e)
-
-            for model_name, model_architecture in MODELS.items():
-                print(f"MODEL: {model_name}")
-                ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name=model_name, model_architecture=model_architecture, hyperparameters=NCV_CONFIGS["MAIN2"], test_batch_size=TEST_BATCH_SIZE, subject_list=EVAL_SUBJECT_LIST)
-                print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+            ncv(outer_k=OUTER_K, inner_k=INNER_K, model_name="NCV", model_architecture=FINAL_MODEL, hyperparameters=FINAL_CONFIG, test_batch_size=TEST_BATCH_SIZE, subject_list=NCV_SUBJECT_LIST)
+            print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
         
-        case 'T':
+        case 'TUNE':
             backends.cudnn.benchmark = False
             backends.cudnn.deterministic = True
 
@@ -413,14 +412,14 @@ if __name__ == "__main__":
             RAW_TRAINING_SET = [HOLDOUT_SUBJECT_LIST[0], HOLDOUT_SUBJECT_LIST[4]] # 1 Class A, 1 Class C
             TESTING_SET = HOLDOUT_SUBJECT_LIST[1:4] # 1 From Each Class
 
-            TRAINING_SET = []
+            TRAINING_SUBJECT_LIST = []
 
             for recording in RAW_TRAINING_SET:
-                TRAINING_SET.append(recording)
-                TRAINING_SET.append(SubjectData(add_gaussian_noise(recording.x), recording.y))
-                TRAINING_SET.append(SubjectData(recording.x * empty(1).uniform_(0.9, 1.1).item(), recording.y))
+                TRAINING_SUBJECT_LIST.append(recording)
+                TRAINING_SUBJECT_LIST.append(SubjectData(add_gaussian_noise(recording.x), recording.y))
+                TRAINING_SUBJECT_LIST.append(SubjectData(recording.x * empty(1).uniform_(0.9, 1.1).item(), recording.y))
 
-            train_loader = DataLoader(SegmentDataset(TRAINING_SET), TUNE_CONFIG["BATCH_SIZE"], shuffle=True, pin_memory=True)
+            train_loader = DataLoader(SegmentDataset(TRAINING_SUBJECT_LIST), TUNE_CONFIG["BATCH_SIZE"], shuffle=True, pin_memory=True)
             test_loader = DataLoader(SegmentDataset(TESTING_SET), TEST_BATCH_SIZE, shuffle=False, pin_memory=True)
             loss_function = FocalLoss(TUNE_CONFIG["ALPHA"], TUNE_CONFIG["GAMMA"], eps=1e-6)
 
