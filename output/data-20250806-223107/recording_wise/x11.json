@@ -1,0 +1,16 @@
+{
+    "loss": 0.04787060245871544,
+    "confusion_matrix": {
+        "TP": 0,
+        "TN": 416,
+        "FP": 20,
+        "FN": 13
+    },
+    "metrics": {
+        "accuracy": 0.9265033407572383,
+        "precision": 0.0,
+        "recall": 0.0,
+        "specificity": 0.9541284403669725,
+        "f1": 0
+    }
+}
