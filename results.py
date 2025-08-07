@@ -29,7 +29,7 @@ majority_class = "Apnea" if total_apnea / total_segments >= 0.5 else "Normal"
 data_path = os.path.join(os.path.abspath("output"), os.listdir(os.path.abspath("output"))[-1], "recording_wise")
 
 model_accs, naive_accs = [], []
-
+eval_confusion_matrix = { "TP": 0, "TN": 0, "FP": 0, "FN": 0 }
 for filename in os.listdir(data_path):
     if not filename.endswith(".json") or not filename.startswith("x"): continue
 
@@ -41,6 +41,11 @@ for filename in os.listdir(data_path):
 
         model_accs.append((TP + TN) / total)
         naive_accs.append((FP + TN) / total)
+
+        eval_confusion_matrix["TP"] += TP
+        eval_confusion_matrix["TN"] += TN
+        eval_confusion_matrix["FP"] += FP
+        eval_confusion_matrix["FN"] += FN
 
 
 model_accs, naive_accs = np.array(model_accs), np.array(naive_accs)
@@ -64,8 +69,15 @@ num_permutations = 1_000_000
 observed_diff, p_value = permutation_test(model_accs, naive_accs, num_permutations)
 
 print("=== Permutation Test Results ===")
-print(f"Observed Mean Difference: {observed_diff:.4f}")
+print(f"Observed Mean Difference: {observed_diff}")
 print(f"One-tailed p-value: {p_value:.6f}\n")
+print("=== Confusion Matrix Summary ===")
+print(f"Accuracy: {(eval_confusion_matrix['TP'] + eval_confusion_matrix['TN']) / sum(eval_confusion_matrix.values())}")
+print(f"Specificity: {eval_confusion_matrix['TN'] / (eval_confusion_matrix['TN'] + eval_confusion_matrix['FP'])}")
+print(f"Recall: {eval_confusion_matrix['TP'] / (eval_confusion_matrix['TP'] + eval_confusion_matrix['FN'])}")
+print(f"Precision: {eval_confusion_matrix['TP'] / (eval_confusion_matrix['TP'] + eval_confusion_matrix['FP'])}")
+print(f"F1 Score: {2 * eval_confusion_matrix['TP'] / (2 * eval_confusion_matrix['TP'] + eval_confusion_matrix['FP'] + eval_confusion_matrix['FN'])}\n\n")
+
 
 # with open(os.path.join(data_path, "summary.json"), "w", encoding="utf8") as file: file.write(re.sub(REGEX, replace_func, json.dumps({
 #     "permutations": num_permutations,
@@ -74,13 +86,26 @@ print(f"One-tailed p-value: {p_value:.6f}\n")
 # }, indent=4)))
     
 model_accs, naive_accs = [], []
+ncv_confusion_matrix = { "TP": 0, "TN": 0, "FP": 0, "FN": 0 }
 for confusion_matrix in NCV_CONFUSION_MATRICES:
     total, TP, TN, FP, FN = sum(confusion_matrix.values()), confusion_matrix["TP"], confusion_matrix["TN"], confusion_matrix["FP"], confusion_matrix["FN"]
     model_accs.append((TP + TN) / total)
     naive_accs.append((FP + TN) / total)
+
+    ncv_confusion_matrix["TP"] += TP
+    ncv_confusion_matrix["TN"] += TN
+    ncv_confusion_matrix["FP"] += FP
+    ncv_confusion_matrix["FN"] += FN
+
 model_accs, naive_accs = np.array(model_accs), np.array(naive_accs)
 
 observed_diff, p_value = permutation_test(model_accs, naive_accs, num_permutations)
 print("=== NCV Permutation Test Results ===")
-print(f"Observed Mean Difference: {observed_diff:.4f}")
-print(f"One-tailed p-value: {p_value:.6f}")
+print(f"Observed Mean Difference: {observed_diff}")
+print(f"One-tailed p-value: {p_value:.6f}\n")
+print("=== NCV Confusion Matrix Summary ===")
+print(f"Accuracy: {(ncv_confusion_matrix['TP'] + ncv_confusion_matrix['TN']) / sum(ncv_confusion_matrix.values())}")
+print(f"Specificity: {ncv_confusion_matrix['TN'] / (ncv_confusion_matrix['TN'] + ncv_confusion_matrix['FP'])}")
+print(f"Recall: {ncv_confusion_matrix['TP'] / (ncv_confusion_matrix['TP'] + ncv_confusion_matrix['FN'])}")
+print(f"Precision: {ncv_confusion_matrix['TP'] / (ncv_confusion_matrix['TP'] + ncv_confusion_matrix['FP'])}")
+print(f"F1 Score: {2 * ncv_confusion_matrix['TP'] / (2 * ncv_confusion_matrix['TP'] + ncv_confusion_matrix['FP'] + ncv_confusion_matrix['FN'])}")
